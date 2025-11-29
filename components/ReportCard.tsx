@@ -1,18 +1,8 @@
 import { useState } from "react";
 import {
-    ExternalLink,
-    Trash2,
-    Pencil,
-    CheckCircle,
-    Ban,
-    Clock,
-    AlertTriangle,
-    Copy,
-    User,
-    FileX
+    ExternalLink, Trash2, Pencil, CheckCircle, Ban, Clock, AlertTriangle, Copy, User, FileX, Info
 } from "lucide-react";
 
-// --- TYPY DANYCH ---
 export interface Report {
     id: string;
     suspectNick: string;
@@ -35,6 +25,7 @@ interface ReportCardProps {
     onChangeStatus: (id: string, status: string) => void;
     onDelete: (id: string, cancel?: boolean) => void;
     onRequestDelete: (id: string) => void;
+    onOpenHistory: (nick: string) => void; // <--- NOWY PROP
 }
 
 export default function ReportCard({
@@ -44,7 +35,8 @@ export default function ReportCard({
                                        onEdit,
                                        onChangeStatus,
                                        onDelete,
-                                       onRequestDelete
+                                       onRequestDelete,
+                                       onOpenHistory // <--- ODBIERAMY GO
                                    }: ReportCardProps) {
 
     const [expanded, setExpanded] = useState(false);
@@ -57,61 +49,49 @@ export default function ReportCard({
         setTimeout(() => setCopiedDc(false), 2000);
     };
 
-    // Renderowanie Badge'a Statusu
     const renderStatus = () => {
         switch (report.status) {
-            case 'banned':
-                return (
-                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/20 border border-red-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-red-900/10">
-                        <Ban className="w-3 h-3" /> Zbanowany
-                    </span>
-                );
-            case 'clean':
-                return (
-                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/20 border border-emerald-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-emerald-900/10">
-                        <CheckCircle className="w-3 h-3" /> Czysty
-                    </span>
-                );
-            default:
-                return (
-                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-yellow-500 bg-yellow-950/20 border border-yellow-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-yellow-900/10">
-                        <Clock className="w-3 h-3" /> Oczekuje
-                    </span>
-                );
+            case 'banned': return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/20 border border-red-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-red-900/10"><Ban className="w-3 h-3" /> Zbanowany</span>;
+            case 'clean': return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/20 border border-emerald-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-emerald-900/10"><CheckCircle className="w-3 h-3" /> Czysty</span>;
+            default: return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-yellow-500 bg-yellow-950/20 border border-yellow-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-yellow-900/10"><Clock className="w-3 h-3" /> Oczekuje</span>;
         }
     };
 
     return (
         <div className={`relative flex flex-col bg-[#0f0f0f] border rounded-xl overflow-hidden transition-all duration-200 hover:border-neutral-700 hover:shadow-xl ${report.deletionRequested ? 'border-red-900/60 shadow-[0_0_15px_rgba(127,29,29,0.1)]' : 'border-neutral-800'}`}>
 
-            {/* --- GÓRA KARTY --- */}
             <div className="p-5 pb-2">
                 <div className="flex justify-between items-start mb-4">
-                    {/* AVATAR + DANE */}
                     <div className="flex gap-3.5">
                         <div className="relative">
                             <img
                                 src={report.authorPhoto || `https://ui-avatars.com/api/?name=${report.checkerNick}&background=random`}
                                 className="w-11 h-11 rounded-lg object-cover bg-neutral-900 border border-neutral-800 shadow-lg"
-                                alt="Admin Avatar"
+                                alt="Avatar"
                             />
                             {report.authorRealName && (
                                 <div className="absolute -bottom-1.5 -right-1.5 bg-[#0f0f0f] border border-neutral-800 p-0.5 rounded-full" title={`Zgłosił Admin: ${report.authorRealName}`}>
-                                    <div className="bg-neutral-800 p-0.5 rounded-full">
-                                        <User className="w-2.5 h-2.5 text-neutral-400" />
-                                    </div>
+                                    <div className="bg-neutral-800 p-0.5 rounded-full"><User className="w-2.5 h-2.5 text-neutral-400" /></div>
                                 </div>
                             )}
                         </div>
 
                         <div>
                             <div className="flex flex-wrap items-center gap-2">
-                                <h3 className="text-base font-bold text-white tracking-tight">{report.suspectNick}</h3>
+                                {/* INTERAKTYWNY NICK - OTWIERA KARTOTEKĘ */}
+                                <button
+                                    onClick={() => onOpenHistory(report.suspectNick)}
+                                    className="text-base font-bold text-white tracking-tight hover:text-blue-400 hover:underline decoration-blue-500/50 underline-offset-4 transition flex items-center gap-1.5 group/nick"
+                                >
+                                    {report.suspectNick}
+                                    <Info className="w-3 h-3 text-neutral-600 opacity-0 group-hover/nick:opacity-100 transition-opacity" />
+                                </button>
+
                                 {report.discordId && (
                                     <button
                                         onClick={(e) => copyDiscord(e, report.discordId!)}
                                         className={`flex items-center gap-1 text-[9px] font-mono border px-1.5 py-0.5 rounded transition ${copiedDc ? 'border-emerald-900 text-emerald-400 bg-emerald-900/10' : 'border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300 bg-neutral-900'}`}
-                                        title="Kliknij, aby skopiować ID Discorda"
+                                        title="Skopiuj Discord ID"
                                     >
                                         {copiedDc ? "SKOPIOWANO" : report.discordId}
                                         {!copiedDc && <Copy className="w-2.5 h-2.5" />}
@@ -123,138 +103,70 @@ export default function ReportCard({
                             </div>
                         </div>
                     </div>
-
-                    {/* STATUS BADGE */}
                     {renderStatus()}
                 </div>
             </div>
 
-            {/* --- TREŚĆ (OPIS) --- */}
+            {/* --- TREŚĆ --- */}
             <div className="px-5 mb-4">
                 <div className="text-xs text-neutral-300 bg-neutral-900/40 p-3.5 rounded-lg border border-neutral-800/60 leading-relaxed font-normal whitespace-pre-wrap">
                     <div className={`overflow-hidden transition-all duration-300 ${expanded ? '' : 'max-h-[3.8rem] line-clamp-3'}`}>
                         {report.description || <span className="text-neutral-600 italic">Brak dodatkowego opisu.</span>}
                     </div>
                     {(report.description && report.description.length > 100) && (
-                        <button
-                            onClick={() => setExpanded(!expanded)}
-                            className="text-[10px] text-neutral-500 hover:text-white mt-2 font-bold uppercase tracking-wider block w-full text-left transition-colors"
-                        >
+                        <button onClick={() => setExpanded(!expanded)} className="text-[10px] text-neutral-500 hover:text-white mt-2 font-bold uppercase tracking-wider block w-full text-left transition-colors">
                             {expanded ? "Zwiń treść" : "... Czytaj więcej"}
                         </button>
                     )}
                 </div>
             </div>
 
-            {/* --- DOLNY PASEK AKCJI --- */}
+            {/* --- STOPKA --- */}
             <div className="mt-auto bg-[#111] border-t border-neutral-800 p-3 flex items-center justify-between gap-3">
-
-                {/* PRZYCISK DOWODU (OBSŁUGA BRAKU LINKU) */}
                 {report.evidenceLink ? (
-                    <a
-                        href={report.evidenceLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-4 py-2 bg-neutral-900 border border-neutral-800 hover:border-neutral-600 hover:bg-neutral-800 rounded-lg text-[11px] font-bold text-neutral-300 hover:text-white transition shadow-sm"
-                    >
-                        <ExternalLink className="w-3.5 h-3.5 text-blue-500" />
-                        Zobacz Dowód
+                    <a href={report.evidenceLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-4 py-2 bg-neutral-900 border border-neutral-800 hover:border-neutral-600 hover:bg-neutral-800 rounded-lg text-[11px] font-bold text-neutral-300 hover:text-white transition shadow-sm">
+                        <ExternalLink className="w-3.5 h-3.5 text-blue-500" /> Zobacz Dowód
                     </a>
                 ) : (
                     <div className="flex items-center gap-2 px-4 py-2 bg-neutral-900/30 border border-neutral-800/30 rounded-lg text-[11px] font-bold text-neutral-600 cursor-not-allowed select-none">
-                        <FileX className="w-3.5 h-3.5" />
-                        Brak dowodu
+                        <FileX className="w-3.5 h-3.5" /> Brak dowodu
                     </div>
                 )}
 
-                {/* PASEK NARZĘDZI (ADMIN/MEMBER) */}
                 <div className="flex items-center gap-1 pl-2 border-l border-neutral-800/50">
-
-                    {/* 1. EDYCJA (Admin) */}
-                    {userRole === "admin" && (
-                        <IconButton onClick={() => onEdit(report)} icon={<Pencil className="w-3.5 h-3.5" />} tip="Edytuj wpis" />
-                    )}
-
-                    {/* 2. ZMIANA STATUSU (Admin + Member) */}
+                    {userRole === "admin" && <IconButton onClick={() => onEdit(report)} icon={<Pencil className="w-3.5 h-3.5" />} tip="Edytuj wpis" />}
                     {(userRole === "admin" || userRole === "member") && (
                         <div className="flex items-center gap-0.5 bg-neutral-900/80 rounded-lg border border-neutral-800 p-0.5 mx-1">
-                            <StatusButton active={report.status === 'clean'} onClick={() => onChangeStatus(report.id, 'clean')} color="text-emerald-500 hover:bg-emerald-950" icon={<CheckCircle className="w-3.5 h-3.5" />} title="Oznacz jako Czysty" />
-                            <StatusButton active={report.status === 'banned'} onClick={() => onChangeStatus(report.id, 'banned')} color="text-red-500 hover:bg-red-950" icon={<Ban className="w-3.5 h-3.5" />} title="Oznacz jako Ban" />
-                            <StatusButton active={report.status === 'pending'} onClick={() => onChangeStatus(report.id, 'pending')} color="text-yellow-500 hover:bg-yellow-950" icon={<Clock className="w-3.5 h-3.5" />} title="Przywróć do oczekujących" />
+                            <StatusButton active={report.status === 'clean'} onClick={() => onChangeStatus(report.id, 'clean')} color="text-emerald-500 hover:bg-emerald-950" icon={<CheckCircle className="w-3.5 h-3.5" />} title="Czysty" />
+                            <StatusButton active={report.status === 'banned'} onClick={() => onChangeStatus(report.id, 'banned')} color="text-red-500 hover:bg-red-950" icon={<Ban className="w-3.5 h-3.5" />} title="Ban" />
+                            <StatusButton active={report.status === 'pending'} onClick={() => onChangeStatus(report.id, 'pending')} color="text-yellow-500 hover:bg-yellow-950" icon={<Clock className="w-3.5 h-3.5" />} title="Oczekuje" />
                         </div>
                     )}
-
-                    {/* 3. USUWANIE */}
-                    {userRole === "admin" ? (
-                        <IconButton onClick={() => onDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-500 hover:bg-red-950/20" tip="Usuń trwale" />
-                    ) : (
-                        report.authorUid === userId && !report.deletionRequested && (
-                            <IconButton onClick={() => onRequestDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-400 hover:bg-red-950/20" tip="Zgłoś do usunięcia" />
-                        )
-                    )}
+                    <div className="ml-2">
+                        {userRole === "admin" ? (
+                            <IconButton onClick={() => onDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-500 hover:bg-red-950/20" tip="Usuń trwale" />
+                        ) : (
+                            report.authorUid === userId && !report.deletionRequested && (
+                                <IconButton onClick={() => onRequestDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-400 hover:bg-red-950/20" tip="Zgłoś usunięcie" />
+                            )
+                        )}
+                    </div>
                 </div>
             </div>
 
-            {/* ALERT O USUWANIU (Overlay) */}
             {report.deletionRequested && (
                 <div className="absolute inset-x-0 bottom-0 bg-red-950/95 backdrop-blur-sm p-3 border-t border-red-900 flex justify-between items-center animate-in slide-in-from-bottom-2 z-10">
-                    <div className="flex items-center gap-2 text-red-200 text-[10px] font-bold uppercase tracking-wider">
-                        <AlertTriangle className="w-4 h-4 text-red-500" />
-                        Oczekuje na usunięcie
-                    </div>
-                    {userRole === 'admin' && (
-                        <div className="flex gap-2">
-                            <button onClick={() => onDelete(report.id, true)} className="text-[10px] text-red-300 hover:text-white underline decoration-red-700 underline-offset-2 transition">
-                                Odrzuć
-                            </button>
-                            <button onClick={() => onDelete(report.id)} className="text-[10px] bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition shadow-lg shadow-red-900/20">
-                                Potwierdź
-                            </button>
-                        </div>
-                    )}
+                    <div className="flex items-center gap-2 text-red-200 text-[10px] font-bold uppercase tracking-wider"><AlertTriangle className="w-4 h-4 text-red-500" /> Zgłoszono do usunięcia</div>
+                    {userRole === 'admin' && <div className="flex gap-2"><button onClick={() => onDelete(report.id, true)} className="text-[10px] text-red-300 hover:text-white underline decoration-red-700 underline-offset-2 transition">Odrzuć</button><button onClick={() => onDelete(report.id)} className="text-[10px] bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition shadow-lg shadow-red-900/20">Potwierdź</button></div>}
                 </div>
             )}
         </div>
     );
 }
 
-// --- POMOCNICZE KOMPONENTY (TYPOWANE) ---
-
-interface IconButtonProps {
-    onClick: () => void;
-    icon: React.ReactNode;
-    color?: string;
-    tip: string;
+function IconButton({ onClick, icon, color = "text-neutral-400 hover:text-white hover:bg-neutral-800", tip }: any) {
+    return <button onClick={onClick} className={`p-2 rounded-md transition-all ${color}`} title={tip}>{icon}</button>;
 }
-
-function IconButton({ onClick, icon, color = "text-neutral-400 hover:text-white hover:bg-neutral-800", tip }: IconButtonProps) {
-    return (
-        <button
-            onClick={onClick}
-            className={`p-2 rounded-md transition-all ${color}`}
-            title={tip}
-        >
-            {icon}
-        </button>
-    );
-}
-
-interface StatusButtonProps {
-    onClick: () => void;
-    icon: React.ReactNode;
-    color: string;
-    title: string;
-    active: boolean;
-}
-
-function StatusButton({ onClick, icon, color, title, active }: StatusButtonProps) {
-    return (
-        <button
-            onClick={onClick}
-            className={`p-1.5 rounded-md transition-all ${active ? 'bg-neutral-800 ring-1 ring-inset ring-white/10 ' + color : 'text-neutral-600 hover:text-neutral-300 hover:bg-neutral-800'}`}
-            title={title}
-        >
-            {icon}
-        </button>
-    );
+function StatusButton({ onClick, icon, color, title, active }: any) {
+    return <button onClick={onClick} className={`p-1.5 rounded-md transition-all ${active ? 'bg-neutral-800 ring-1 ring-inset ring-white/10 ' + color : 'text-neutral-600 hover:text-neutral-300 hover:bg-neutral-800'}`} title={title}>{icon}</button>;
 }

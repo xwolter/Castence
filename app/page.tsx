@@ -12,8 +12,9 @@ import {
 import Header from "@/components/Header";
 import PinWidget from "@/components/PinWidget";
 import ReportForm from "@/components/ReportForm";
-import ReportCard from "@/components/ReportCard";
+import ReportCard, { Report } from "@/components/ReportCard";
 import AdminPanel from "@/components/AdminPanel";
+import PlayerHistoryModal from "@/components/PlayerHistoryModal"; // Kartoteka
 
 export default function Home() {
   const router = useRouter();
@@ -25,10 +26,15 @@ export default function Home() {
 
   const [reports, setReports] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
+
+  // Modale
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [historyNick, setHistoryNick] = useState<string | null>(null); // Stan dla Kartoteki
+
+  // Edycja
   const [editId, setEditId] = useState<string | null>(null);
 
-  // Stan PIN (Używany tylko w PinWidget po lewej, nie w Admin Panelu)
+  // Piny (Zostawiamy logikę, mimo że UI zablokowane)
   const [userPin, setUserPin] = useState(null);
 
   // Filtrowanie
@@ -52,12 +58,13 @@ export default function Home() {
       setUser(currentUser);
 
       if (currentUser) {
-        // Domyślnie ustaw nick sprawdzającego
+        // Domyślny nick w formularzu
         setFormData(prev => ({ ...prev, checkerNick: currentUser.displayName || "" }));
 
-        // Sprawdzanie Admina / Membera / Pending
+        // Sprawdzanie Roli
         if (currentUser.email === OWNER_EMAIL) {
           setUserRole("admin");
+          // Aktualizacja danych admina (bez nadpisywania roli jeśli już jest)
           await setDoc(doc(db, "users", currentUser.uid), {
             email: currentUser.email,
             displayName: currentUser.displayName,
@@ -70,7 +77,7 @@ export default function Home() {
           if (userSnap.exists()) {
             setUserRole(userSnap.data().role);
           } else {
-            // Nowy user -> Pending
+            // Nowy user = Pending
             await setDoc(doc(db, "users", currentUser.uid), {
               email: currentUser.email,
               displayName: currentUser.displayName,
@@ -82,7 +89,7 @@ export default function Home() {
           }
         }
 
-        // Sprawdź PIN (dla Widgetu po lewej)
+        // Pobranie PINu (dla widgetu po lewej)
         const q = query(collection(db, "pins"), where("usedBy", "==", currentUser.uid));
         const snap = await getDocs(q);
         if (!snap.empty) setUserPin(snap.docs[0].data().code);
@@ -115,7 +122,6 @@ export default function Home() {
 
   // --- FUNKCJE ---
 
-  // Funkcja zmiany nicku (Wymagana przez nowy AdminPanel)
   const updateUserNick = async (uid: string, newNick: string) => {
     try {
       await updateDoc(doc(db, "users", uid), { displayName: newNick });
@@ -127,9 +133,8 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // POPRAWKA: Pozwalamy na pusty link (evidenceLink)
-    if (!formData.suspectNick || !formData.checkerNick) return alert("Musisz podać nick gracza i swój nick.");
+    // Walidacja: Link nie jest już wymagany
+    if (!formData.suspectNick || !formData.checkerNick) return alert("Musisz podać nick gracza i swój.");
 
     const data = {
       ...formData,
@@ -149,14 +154,7 @@ export default function Home() {
         await addDoc(collection(db, "reports"), data);
       }
       setEditId(null);
-      // Reset formularza
-      setFormData({
-        suspectNick: "",
-        discordId: "",
-        checkerNick: user?.displayName || "",
-        evidenceLink: "",
-        description: ""
-      });
+      setFormData({suspectNick:"", discordId:"", checkerNick: user?.displayName || "", evidenceLink:"", description:""});
     } catch(e){ console.error(e); }
   };
 
@@ -218,13 +216,22 @@ export default function Home() {
   return (
       <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-neutral-800">
 
+        {/* MODAL KARTOTEKI */}
+        {historyNick && (
+            <PlayerHistoryModal
+                nick={historyNick}
+                allReports={reports} // <--- TO JEST KLUCZOWE
+                onClose={() => setHistoryNick(null)}
+            />
+        )}
+
         {/* ADMIN PANEL */}
         {showAdminPanel && userRole === "admin" && (
             <AdminPanel
                 onClose={() => setShowAdminPanel(false)}
                 usersList={usersList}
                 changeUserRole={changeUserRole}
-                updateUserNick={updateUserNick} // <--- PRZEKAZUJEMY NOWĄ FUNKCJĘ
+                updateUserNick={updateUserNick}
             />
         )}
 
@@ -238,7 +245,7 @@ export default function Home() {
 
         <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
 
-          {/* LEWA KOLUMNA: WIDGETY */}
+          {/* LEWA KOLUMNA */}
           <div className="lg:col-span-1 space-y-6">
             <PinWidget userPin={userPin} onClaim={() => {}} onCopy={(t) => navigator.clipboard.writeText(t)} />
             <ReportForm
@@ -250,28 +257,28 @@ export default function Home() {
             />
           </div>
 
-          {/* PRAWA KOLUMNA: LISTA */}
+          {/* PRAWA KOLUMNA */}
           <div className="lg:col-span-3">
 
             {/* PASEK FILTRÓW */}
             <div className="flex flex-col sm:flex-row gap-3 mb-6">
               <div className="flex-1">
-                <input type="text" placeholder="Szukaj..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2 bg-neutral-900 border border-neutral-800 rounded text-xs focus:border-neutral-600 outline-none text-white" />
+                <input type="text" placeholder="Szukaj (nick, discord, id)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 bg-[#0f0f0f] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white transition placeholder:text-neutral-600" />
               </div>
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded text-xs text-neutral-400 p-2 outline-none">
-                <option value="all">Wszystkie</option>
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-[#0f0f0f] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700">
+                <option value="all">Wszystkie Statusy</option>
                 <option value="pending">Oczekujące</option>
-                <option value="banned">Zbanowani</option>
-                <option value="clean">Czysty</option>
+                <option value="banned">Zbanowane</option>
+                <option value="clean">Czyste</option>
               </select>
-              <select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="bg-neutral-900 border border-neutral-800 rounded text-xs text-neutral-400 p-2 outline-none">
+              <select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="bg-[#0f0f0f] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700">
                 <option value="suspect">Szukaj Gracza</option>
                 <option value="checker">Szukaj Admina</option>
                 <option value="id">Szukaj ID</option>
               </select>
             </div>
 
-            {/* GRID KART */}
+            {/* LISTA KART */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {currentReports.map((report) => (
                   <ReportCard
@@ -283,6 +290,7 @@ export default function Home() {
                       onChangeStatus={changeReportStatus}
                       onDelete={confirmDeletion}
                       onRequestDelete={requestDeletion}
+                      onOpenHistory={setHistoryNick} // PRZEKAZANIE FUNKCJI HISTORII
                   />
               ))}
             </div>
@@ -290,9 +298,9 @@ export default function Home() {
             {/* PAGINACJA */}
             {totalPages > 1 && (
                 <div className="flex justify-center gap-2 mt-8">
-                  <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-1 bg-neutral-900 border border-neutral-800 rounded text-xs text-neutral-400 disabled:opacity-50">Poprzednia</button>
-                  <span className="px-3 py-1 text-xs text-neutral-500 border border-neutral-800 rounded bg-neutral-900">{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-3 py-1 bg-neutral-900 border border-neutral-800 rounded text-xs text-neutral-400 disabled:opacity-50">Następna</button>
+                  <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 transition">Poprzednia</button>
+                  <span className="px-4 py-2 text-xs text-neutral-500 border border-neutral-800 rounded-lg bg-neutral-900 font-mono">{currentPage} / {totalPages}</span>
+                  <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 transition">Następna</button>
                 </div>
             )}
           </div>
