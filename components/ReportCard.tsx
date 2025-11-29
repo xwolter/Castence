@@ -1,12 +1,33 @@
 import { useState } from "react";
 
-const Badge = ({ status }) => {
+// Proste typowanie dla Badge (inline)
+const Badge = ({ status }: { status: string }) => {
     if (status === 'banned') return <span className="text-red-400 border border-red-500/30 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider">Zbanowany</span>;
     if (status === 'clean') return <span className="text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider">Czysty</span>;
     return <span className="text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider">Oczekuje</span>;
 };
 
-export default function ReportCard({ report, userRole, userId, onEdit, onChangeStatus, onDelete, onRequestDelete }) {
+// Definicja typów dla ReportCard
+interface ReportCardProps {
+    report: any; // Używamy any dla obiektu z bazy, żeby nie blokować builda przy zmianach w bazie
+    userRole: string;
+    userId: string | undefined;
+    onEdit: (report: any) => void;
+    onChangeStatus: (id: string, status: string) => void;
+    onDelete: (id: string, cancel?: boolean) => void;
+    onRequestDelete: (id: string) => void;
+}
+
+export default function ReportCard({
+                                       report,
+                                       userRole,
+                                       userId,
+                                       onEdit,
+                                       onChangeStatus,
+                                       onDelete,
+                                       onRequestDelete
+                                   }: ReportCardProps) {
+
     const [expanded, setExpanded] = useState(false);
 
     return (

@@ -20,7 +20,7 @@ export default function PinWidget({ userPin, onClaim, onCopy }: PinWidgetProps) 
                 <h2 className="text-xs font-bold text-neutral-500 uppercase mb-3 tracking-wider">Twój Ocean PIN</h2>
                 {userPin ? (
                     <div className="flex flex-col gap-2">
-                        <div 
+                        <div
                             // Dodałem obsługę kliknięcia, żeby kopiowanie działało (jak włączysz moduł)
                             onClick={() => userPin && onCopy(userPin)}
                             className="bg-neutral-950 border border-neutral-700 border-dashed rounded p-3 text-center cursor-pointer hover:border-emerald-500 transition"
@@ -32,7 +32,7 @@ export default function PinWidget({ userPin, onClaim, onCopy }: PinWidgetProps) 
                 ) : (
                     <div className="text-center">
                         <p className="text-xs text-neutral-500 mb-3">Odbierz swój klucz licencyjny.</p>
-                        <button 
+                        <button
                             onClick={onClaim}
                             className="w-full py-2 bg-blue-900/20 text-blue-400 border border-blue-900/50 rounded text-xs font-bold"
                         >
