@@ -1,18 +1,37 @@
 import { useState } from "react";
+import {
+    ExternalLink,
+    Trash2,
+    Pencil,
+    CheckCircle,
+    Ban,
+    Clock,
+    AlertTriangle,
+    Copy,
+    User,
+    FileX
+} from "lucide-react";
 
-// Proste typowanie dla Badge (inline)
-const Badge = ({ status }: { status: string }) => {
-    if (status === 'banned') return <span className="text-red-400 border border-red-500/30 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider">Zbanowany</span>;
-    if (status === 'clean') return <span className="text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider">Czysty</span>;
-    return <span className="text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider">Oczekuje</span>;
-};
+// --- TYPY DANYCH ---
+export interface Report {
+    id: string;
+    suspectNick: string;
+    checkerNick: string;
+    status: 'pending' | 'banned' | 'clean';
+    evidenceLink: string;
+    description: string;
+    discordId?: string;
+    authorUid: string;
+    authorPhoto?: string;
+    authorRealName?: string;
+    deletionRequested?: boolean;
+}
 
-// Definicja typów dla ReportCard
 interface ReportCardProps {
-    report: any; // Używamy any dla obiektu z bazy, żeby nie blokować builda przy zmianach w bazie
+    report: Report;
     userRole: string;
     userId: string | undefined;
-    onEdit: (report: any) => void;
+    onEdit: (report: Report) => void;
     onChangeStatus: (id: string, status: string) => void;
     onDelete: (id: string, cancel?: boolean) => void;
     onRequestDelete: (id: string) => void;
@@ -29,74 +48,213 @@ export default function ReportCard({
                                    }: ReportCardProps) {
 
     const [expanded, setExpanded] = useState(false);
+    const [copiedDc, setCopiedDc] = useState(false);
+
+    const copyDiscord = (e: React.MouseEvent, text: string) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(text);
+        setCopiedDc(true);
+        setTimeout(() => setCopiedDc(false), 2000);
+    };
+
+    // Renderowanie Badge'a Statusu
+    const renderStatus = () => {
+        switch (report.status) {
+            case 'banned':
+                return (
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/20 border border-red-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-red-900/10">
+                        <Ban className="w-3 h-3" /> Zbanowany
+                    </span>
+                );
+            case 'clean':
+                return (
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/20 border border-emerald-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-emerald-900/10">
+                        <CheckCircle className="w-3 h-3" /> Czysty
+                    </span>
+                );
+            default:
+                return (
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-yellow-500 bg-yellow-950/20 border border-yellow-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-yellow-900/10">
+                        <Clock className="w-3 h-3" /> Oczekuje
+                    </span>
+                );
+        }
+    };
 
     return (
-        <div className={`bg-neutral-900 rounded border p-4 flex flex-col transition hover:border-neutral-700 ${report.deletionRequested ? 'border-red-900/40 bg-red-950/10' : 'border-neutral-800'}`}>
-            <div className="flex justify-between items-start mb-3">
-                <div className="flex gap-3 items-center">
-                    <div className="w-8 h-8 rounded bg-neutral-800 overflow-hidden">
-                        <img src={report.authorPhoto || "https://ui-avatars.com/api/?name=?"} className="w-full h-full object-cover opacity-80" alt="Avatar"/>
-                    </div>
-                    <div>
-                        <h3 className="text-sm font-bold text-white">{report.suspectNick}</h3>
-                        {report.discordId && <div className="text-[10px] text-neutral-500 font-mono">DC: {report.discordId}</div>}
-                        <div className="text-[10px] text-neutral-500 mt-0.5">
-                            przez: <span className="text-neutral-400">{report.checkerNick}</span>
-                            {userRole === 'admin' && report.authorRealName && (
-                                <span className="ml-1 text-neutral-600">({report.authorRealName})</span>
+        <div className={`relative flex flex-col bg-[#0f0f0f] border rounded-xl overflow-hidden transition-all duration-200 hover:border-neutral-700 hover:shadow-xl ${report.deletionRequested ? 'border-red-900/60 shadow-[0_0_15px_rgba(127,29,29,0.1)]' : 'border-neutral-800'}`}>
+
+            {/* --- GÓRA KARTY --- */}
+            <div className="p-5 pb-2">
+                <div className="flex justify-between items-start mb-4">
+                    {/* AVATAR + DANE */}
+                    <div className="flex gap-3.5">
+                        <div className="relative">
+                            <img
+                                src={report.authorPhoto || `https://ui-avatars.com/api/?name=${report.checkerNick}&background=random`}
+                                className="w-11 h-11 rounded-lg object-cover bg-neutral-900 border border-neutral-800 shadow-lg"
+                                alt="Admin Avatar"
+                            />
+                            {report.authorRealName && (
+                                <div className="absolute -bottom-1.5 -right-1.5 bg-[#0f0f0f] border border-neutral-800 p-0.5 rounded-full" title={`Zgłosił Admin: ${report.authorRealName}`}>
+                                    <div className="bg-neutral-800 p-0.5 rounded-full">
+                                        <User className="w-2.5 h-2.5 text-neutral-400" />
+                                    </div>
+                                </div>
                             )}
                         </div>
+
+                        <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-base font-bold text-white tracking-tight">{report.suspectNick}</h3>
+                                {report.discordId && (
+                                    <button
+                                        onClick={(e) => copyDiscord(e, report.discordId!)}
+                                        className={`flex items-center gap-1 text-[9px] font-mono border px-1.5 py-0.5 rounded transition ${copiedDc ? 'border-emerald-900 text-emerald-400 bg-emerald-900/10' : 'border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300 bg-neutral-900'}`}
+                                        title="Kliknij, aby skopiować ID Discorda"
+                                    >
+                                        {copiedDc ? "SKOPIOWANO" : report.discordId}
+                                        {!copiedDc && <Copy className="w-2.5 h-2.5" />}
+                                    </button>
+                                )}
+                            </div>
+                            <div className="text-[11px] text-neutral-500 mt-0.5">
+                                Sprawdzający: <span className="text-neutral-300 font-medium">{report.checkerNick}</span>
+                            </div>
+                        </div>
                     </div>
+
+                    {/* STATUS BADGE */}
+                    {renderStatus()}
                 </div>
-                <Badge status={report.status} />
             </div>
 
-            <div className="mb-4">
-                <div className={`text-xs text-neutral-400 bg-neutral-950/30 p-2 rounded border border-neutral-800/30 overflow-hidden transition-all ${expanded ? '' : 'max-h-[3.2rem]'}`}>
-                    {report.description || <span className="italic text-neutral-600">Brak opisu</span>}
+            {/* --- TREŚĆ (OPIS) --- */}
+            <div className="px-5 mb-4">
+                <div className="text-xs text-neutral-300 bg-neutral-900/40 p-3.5 rounded-lg border border-neutral-800/60 leading-relaxed font-normal whitespace-pre-wrap">
+                    <div className={`overflow-hidden transition-all duration-300 ${expanded ? '' : 'max-h-[3.8rem] line-clamp-3'}`}>
+                        {report.description || <span className="text-neutral-600 italic">Brak dodatkowego opisu.</span>}
+                    </div>
+                    {(report.description && report.description.length > 100) && (
+                        <button
+                            onClick={() => setExpanded(!expanded)}
+                            className="text-[10px] text-neutral-500 hover:text-white mt-2 font-bold uppercase tracking-wider block w-full text-left transition-colors"
+                        >
+                            {expanded ? "Zwiń treść" : "... Czytaj więcej"}
+                        </button>
+                    )}
                 </div>
-                {(report.description && report.description.length > 50) && (
-                    <button onClick={() => setExpanded(!expanded)} className="text-[9px] text-neutral-500 hover:text-white mt-1 underline ml-1">
-                        {expanded ? "Zwiń" : "Pokaż więcej"}
-                    </button>
+            </div>
+
+            {/* --- DOLNY PASEK AKCJI --- */}
+            <div className="mt-auto bg-[#111] border-t border-neutral-800 p-3 flex items-center justify-between gap-3">
+
+                {/* PRZYCISK DOWODU (OBSŁUGA BRAKU LINKU) */}
+                {report.evidenceLink ? (
+                    <a
+                        href={report.evidenceLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 bg-neutral-900 border border-neutral-800 hover:border-neutral-600 hover:bg-neutral-800 rounded-lg text-[11px] font-bold text-neutral-300 hover:text-white transition shadow-sm"
+                    >
+                        <ExternalLink className="w-3.5 h-3.5 text-blue-500" />
+                        Zobacz Dowód
+                    </a>
+                ) : (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-neutral-900/30 border border-neutral-800/30 rounded-lg text-[11px] font-bold text-neutral-600 cursor-not-allowed select-none">
+                        <FileX className="w-3.5 h-3.5" />
+                        Brak dowodu
+                    </div>
                 )}
-            </div>
 
-            <div className="mt-auto space-y-3">
-                <a href={report.evidenceLink} target="_blank" rel="noopener noreferrer" className="block text-center w-full py-1.5 bg-neutral-950 border border-neutral-800 hover:bg-neutral-800 rounded text-[10px] text-blue-400 hover:text-white transition">
-                    Otwórz Dowód
-                </a>
+                {/* PASEK NARZĘDZI (ADMIN/MEMBER) */}
+                <div className="flex items-center gap-1 pl-2 border-l border-neutral-800/50">
 
-                <div className="flex justify-between items-center pt-2 border-t border-neutral-800">
-                    <span className="text-[10px] text-neutral-600 font-mono tracking-tighter">#{report.id.slice(0, 6)}</span>
+                    {/* 1. EDYCJA (Admin) */}
+                    {userRole === "admin" && (
+                        <IconButton onClick={() => onEdit(report)} icon={<Pencil className="w-3.5 h-3.5" />} tip="Edytuj wpis" />
+                    )}
 
-                    <div className="flex gap-2">
-                        {userRole === "admin" && (
-                            <>
-                                <button onClick={() => onEdit(report)} className="text-[10px] text-neutral-500 hover:text-white">Edytuj</button>
-                                <span className="text-neutral-800">|</span>
-                                <button onClick={() => onChangeStatus(report.id, 'clean')} className="text-[10px] text-emerald-600 hover:text-emerald-400">Czysty</button>
-                                <button onClick={() => onChangeStatus(report.id, 'banned')} className="text-[10px] text-red-600 hover:text-red-400">Ban</button>
-                                <span className="text-neutral-800">|</span>
-                                <button onClick={() => onDelete(report.id)} className="text-[10px] text-neutral-600 hover:text-red-500">Usuń</button>
-                            </>
-                        )}
+                    {/* 2. ZMIANA STATUSU (Admin + Member) */}
+                    {(userRole === "admin" || userRole === "member") && (
+                        <div className="flex items-center gap-0.5 bg-neutral-900/80 rounded-lg border border-neutral-800 p-0.5 mx-1">
+                            <StatusButton active={report.status === 'clean'} onClick={() => onChangeStatus(report.id, 'clean')} color="text-emerald-500 hover:bg-emerald-950" icon={<CheckCircle className="w-3.5 h-3.5" />} title="Oznacz jako Czysty" />
+                            <StatusButton active={report.status === 'banned'} onClick={() => onChangeStatus(report.id, 'banned')} color="text-red-500 hover:bg-red-950" icon={<Ban className="w-3.5 h-3.5" />} title="Oznacz jako Ban" />
+                            <StatusButton active={report.status === 'pending'} onClick={() => onChangeStatus(report.id, 'pending')} color="text-yellow-500 hover:bg-yellow-950" icon={<Clock className="w-3.5 h-3.5" />} title="Przywróć do oczekujących" />
+                        </div>
+                    )}
 
-                        {userRole === "member" && (
-                            report.authorUid === userId ? (
-                                !report.deletionRequested && <button onClick={() => onRequestDelete(report.id)} className="text-[10px] text-red-500 hover:underline">Zgłoś usunięcie</button>
-                            ) : null
-                        )}
-                    </div>
+                    {/* 3. USUWANIE */}
+                    {userRole === "admin" ? (
+                        <IconButton onClick={() => onDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-500 hover:bg-red-950/20" tip="Usuń trwale" />
+                    ) : (
+                        report.authorUid === userId && !report.deletionRequested && (
+                            <IconButton onClick={() => onRequestDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-400 hover:bg-red-950/20" tip="Zgłoś do usunięcia" />
+                        )
+                    )}
                 </div>
-
-                {report.deletionRequested && (
-                    <div className="flex justify-between items-center bg-red-900/10 px-2 py-1 rounded border border-red-900/20">
-                        <span className="text-[9px] text-red-500 font-bold uppercase">Zgłoszono do usunięcia</span>
-                        {userRole === 'admin' && <button onClick={() => onDelete(report.id, true)} className="text-[9px] text-neutral-400 hover:text-white">Anuluj</button>}
-                    </div>
-                )}
             </div>
+
+            {/* ALERT O USUWANIU (Overlay) */}
+            {report.deletionRequested && (
+                <div className="absolute inset-x-0 bottom-0 bg-red-950/95 backdrop-blur-sm p-3 border-t border-red-900 flex justify-between items-center animate-in slide-in-from-bottom-2 z-10">
+                    <div className="flex items-center gap-2 text-red-200 text-[10px] font-bold uppercase tracking-wider">
+                        <AlertTriangle className="w-4 h-4 text-red-500" />
+                        Oczekuje na usunięcie
+                    </div>
+                    {userRole === 'admin' && (
+                        <div className="flex gap-2">
+                            <button onClick={() => onDelete(report.id, true)} className="text-[10px] text-red-300 hover:text-white underline decoration-red-700 underline-offset-2 transition">
+                                Odrzuć
+                            </button>
+                            <button onClick={() => onDelete(report.id)} className="text-[10px] bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition shadow-lg shadow-red-900/20">
+                                Potwierdź
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
+    );
+}
+
+// --- POMOCNICZE KOMPONENTY (TYPOWANE) ---
+
+interface IconButtonProps {
+    onClick: () => void;
+    icon: React.ReactNode;
+    color?: string;
+    tip: string;
+}
+
+function IconButton({ onClick, icon, color = "text-neutral-400 hover:text-white hover:bg-neutral-800", tip }: IconButtonProps) {
+    return (
+        <button
+            onClick={onClick}
+            className={`p-2 rounded-md transition-all ${color}`}
+            title={tip}
+        >
+            {icon}
+        </button>
+    );
+}
+
+interface StatusButtonProps {
+    onClick: () => void;
+    icon: React.ReactNode;
+    color: string;
+    title: string;
+    active: boolean;
+}
+
+function StatusButton({ onClick, icon, color, title, active }: StatusButtonProps) {
+    return (
+        <button
+            onClick={onClick}
+            className={`p-1.5 rounded-md transition-all ${active ? 'bg-neutral-800 ring-1 ring-inset ring-white/10 ' + color : 'text-neutral-600 hover:text-neutral-300 hover:bg-neutral-800'}`}
+            title={title}
+        >
+            {icon}
+        </button>
     );
 }

@@ -1,6 +1,7 @@
 import React from "react";
+import { User, MessageSquare, Link as LinkIcon, FileText, Save, Plus, X, Shield, Pencil } from "lucide-react";
 
-// 1. Definiujemy kształt danych formularza
+// --- TYPY ---
 interface FormData {
     suspectNick: string;
     discordId: string;
@@ -9,14 +10,17 @@ interface FormData {
     description: string;
 }
 
-// 2. Definiujemy propsy komponentu
 interface ReportFormProps {
     formData: FormData;
-    setFormData: React.Dispatch<React.SetStateAction<FormData>>; // Typ standardowego hooka useState
+    setFormData: React.Dispatch<React.SetStateAction<FormData>>;
     onSubmit: (e: React.FormEvent) => void;
     editId: string | null;
     onCancelEdit: () => void;
 }
+
+// --- STAŁE STYLÓW (Dla czystości kodu) ---
+const INPUT_STYLE = "w-full p-2.5 bg-[#161616] border border-neutral-800 rounded-lg text-sm text-white placeholder:text-neutral-700 focus:border-neutral-600 focus:ring-1 focus:ring-neutral-600 outline-none transition-all duration-200";
+const LABEL_STYLE = "text-[9px] font-bold text-neutral-500 uppercase tracking-wider flex items-center gap-1.5 ml-1 mb-1.5";
 
 export default function ReportForm({
                                        formData,
@@ -26,71 +30,110 @@ export default function ReportForm({
                                        onCancelEdit
                                    }: ReportFormProps) {
     return (
-        <div className={`bg-neutral-900 p-5 rounded border transition-colors ${editId ? 'border-yellow-500/30' : 'border-neutral-800'}`}>
-            <h2 className="text-sm font-semibold text-white mb-4 flex justify-between items-center">
-                {editId ? "Edytuj Wpis" : "Dodaj Zgłoszenie"}
-                {editId && <button onClick={onCancelEdit} className="text-xs text-neutral-500 hover:text-white underline">Anuluj</button>}
-            </h2>
+        <div className={`bg-[#0f0f0f] p-3 rounded-xl border transition-all duration-300 ${editId ? 'border-yellow-900/40 shadow-[0_0_30px_rgba(234,179,8,0.05)]' : 'border-neutral-800 shadow-2xl'}`}>
 
-            <form onSubmit={onSubmit} className="flex flex-col gap-3">
+            {/* NAGŁÓWEK */}
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-neutral-800/60">
+                <h2 className={`text-xs font-black flex items-center gap-2 uppercase tracking-widest ${editId ? 'text-yellow-500' : 'text-white'}`}>
+                    {editId ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    {editId ? "Edycja Wpisu" : "Nowe Zgłoszenie"}
+                </h2>
+                {editId && (
+                    <button
+                        onClick={onCancelEdit}
+                        className="text-[10px] font-bold text-neutral-500 hover:text-white flex items-center gap-1 transition bg-neutral-900 border border-neutral-800 px-3 py-1.5 rounded-md hover:bg-neutral-800"
+                    >
+                        <X className="w-3 h-3" /> ANULUJ
+                    </button>
+                )}
+            </div>
+
+            <form onSubmit={onSubmit} className="space-y-5">
+
+                {/* 1. NICK PODEJRZANEGO */}
                 <div>
-                    <label className="text-[10px] text-neutral-500 font-bold uppercase block mb-1">Nick Podejrzanego</label>
+                    <label className={LABEL_STYLE}>
+                        <User className="w-3 h-3" /> Nick Gracza <span className="text-red-500">*</span>
+                    </label>
                     <input
                         type="text"
-                        placeholder="Nick..."
-                        className="w-full p-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-white focus:border-neutral-600 outline-none"
+                        placeholder="np. Steve123"
+                        className={INPUT_STYLE}
                         value={formData.suspectNick}
                         onChange={(e) => setFormData({...formData, suspectNick: e.target.value})}
                     />
                 </div>
 
+                {/* 2. DISCORD ID */}
                 <div>
-                    <label className="text-[10px] text-neutral-500 font-bold uppercase block mb-1">Discord ID (Opcjonalne)</label>
+                    <label className={LABEL_STYLE}>
+                        <MessageSquare className="w-3 h-3" /> Discord ID
+                    </label>
                     <input
                         type="text"
-                        placeholder="np. 34857..."
-                        className="w-full p-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-white focus:border-neutral-600 outline-none font-mono"
+                        placeholder="np. 34857293..."
+                        className={`${INPUT_STYLE} font-mono text-xs`}
                         value={formData.discordId}
                         onChange={(e) => setFormData({...formData, discordId: e.target.value})}
                     />
                 </div>
 
+                {/* 3. TWÓJ NICK */}
                 <div>
-                    <label className="text-[10px] text-neutral-500 font-bold uppercase block mb-1">Twój Nick (z gry)</label>
+                    <label className={LABEL_STYLE}>
+                        <Shield className="w-3 h-3" /> Twój Nick <span className="text-red-500">*</span>
+                    </label>
                     <input
                         type="text"
-                        placeholder="Twój nick..."
-                        className="w-full p-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-neutral-300 focus:border-neutral-600 outline-none"
+                        placeholder="Wpisz swój nick..."
+                        className={INPUT_STYLE}
                         value={formData.checkerNick}
                         onChange={(e) => setFormData({...formData, checkerNick: e.target.value})}
                     />
                 </div>
 
+                {/* 4. LINK DOWODU */}
                 <div>
-                    <label className="text-[10px] text-neutral-500 font-bold uppercase block mb-1">Link do dowodu</label>
+                    <label className={LABEL_STYLE}>
+                        <LinkIcon className="w-3 h-3" /> Link do dowodu
+                        <span className="text-neutral-600 font-normal normal-case ml-auto opacity-70">(Opcjonalne)</span>
+                    </label>
                     <input
                         type="url"
                         placeholder="https://..."
-                        className="w-full p-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-blue-400 focus:border-neutral-600 outline-none"
+                        className={`${INPUT_STYLE} text-blue-400`}
                         value={formData.evidenceLink}
                         onChange={(e) => setFormData({...formData, evidenceLink: e.target.value})}
                     />
                 </div>
 
+                {/* 5. OPIS */}
                 <div>
-                    <label className="text-[10px] text-neutral-500 font-bold uppercase block mb-1">Opis</label>
+                    <label className={LABEL_STYLE}>
+                        <FileText className="w-3 h-3" /> Notatka / Powód
+                    </label>
                     <textarea
-                        rows={4}
-                        placeholder="Opisz sytuację..."
-                        className="w-full p-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-white focus:border-neutral-600 outline-none resize-none"
+                        rows={3}
+                        placeholder="Krótki opis sytuacji..."
+                        className={`${INPUT_STYLE} resize-none`}
                         value={formData.description}
                         onChange={(e) => setFormData({...formData, description: e.target.value})}
                     />
                 </div>
 
-                <button type="submit" className={`w-full py-2 rounded text-xs font-medium transition mt-2 ${editId ? 'bg-yellow-700 hover:bg-yellow-600 text-white' : 'bg-neutral-100 hover:bg-white text-neutral-900'}`}>
-                    {editId ? "Zapisz" : "Dodaj"}
-                </button>
+                {/* PRZYCISK ZAPISU */}
+                <div className="pt-2">
+                    <button
+                        type="submit"
+                        className={`w-full py-3 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all duration-200 flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] ${
+                            editId
+                                ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-yellow-900/20'
+                                : 'bg-white hover:bg-neutral-200 text-black shadow-white/5 border border-transparent'
+                        }`}
+                    >
+                        {editId ? <><Save className="w-4 h-4" /> Zapisz Zmiany</> : <><Plus className="w-4 h-4" /> Dodaj do Bazy</>}
+                    </button>
+                </div>
             </form>
         </div>
     );
