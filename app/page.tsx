@@ -10,11 +10,11 @@ import {
 
 // IMPORT KOMPONENTÓW
 import Header from "@/components/Header";
-import PinWidget from "@/components/PinWidget";
+import WantedWidget from "@/components/WantedWidget"; // <--- NOWY WIDGET
 import ReportForm from "@/components/ReportForm";
 import ReportCard, { Report } from "@/components/ReportCard";
 import AdminPanel from "@/components/AdminPanel";
-import PlayerHistoryModal from "@/components/PlayerHistoryModal"; // Kartoteka
+import PlayerHistoryModal from "@/components/PlayerHistoryModal";
 
 export default function Home() {
   const router = useRouter();
@@ -27,15 +27,15 @@ export default function Home() {
   const [reports, setReports] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
 
+  // Stan dla licznika Wanted
+  const [wantedCount, setWantedCount] = useState(0);
+
   // Modale
   const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [historyNick, setHistoryNick] = useState<string | null>(null); // Stan dla Kartoteki
+  const [historyNick, setHistoryNick] = useState<string | null>(null);
 
   // Edycja
   const [editId, setEditId] = useState<string | null>(null);
-
-  // Piny (Zostawiamy logikę, mimo że UI zablokowane)
-  const [userPin, setUserPin] = useState(null);
 
   // Filtrowanie
   const [searchTerm, setSearchTerm] = useState("");
@@ -58,13 +58,11 @@ export default function Home() {
       setUser(currentUser);
 
       if (currentUser) {
-        // Domyślny nick w formularzu
         setFormData(prev => ({ ...prev, checkerNick: currentUser.displayName || "" }));
 
         // Sprawdzanie Roli
         if (currentUser.email === OWNER_EMAIL) {
           setUserRole("admin");
-          // Aktualizacja danych admina (bez nadpisywania roli jeśli już jest)
           await setDoc(doc(db, "users", currentUser.uid), {
             email: currentUser.email,
             displayName: currentUser.displayName,
@@ -77,7 +75,6 @@ export default function Home() {
           if (userSnap.exists()) {
             setUserRole(userSnap.data().role);
           } else {
-            // Nowy user = Pending
             await setDoc(doc(db, "users", currentUser.uid), {
               email: currentUser.email,
               displayName: currentUser.displayName,
@@ -88,11 +85,6 @@ export default function Home() {
             setUserRole("pending");
           }
         }
-
-        // Pobranie PINu (dla widgetu po lewej)
-        const q = query(collection(db, "pins"), where("usedBy", "==", currentUser.uid));
-        const snap = await getDocs(q);
-        if (!snap.empty) setUserPin(snap.docs[0].data().code);
       }
     });
     return () => unsubscribe();
@@ -101,11 +93,18 @@ export default function Home() {
   // --- 2. POBIERANIE DANYCH ---
   useEffect(() => {
     if (userRole === "member" || userRole === "admin") {
-      const q = query(collection(db, "reports"), orderBy("createdAt", "desc"));
-      const unsubReports = onSnapshot(q, (snapshot) => {
+
+      // 1. Raporty
+      const qReports = query(collection(db, "reports"), orderBy("createdAt", "desc"));
+      const unsubReports = onSnapshot(qReports, (snapshot) => {
         setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
-      return () => unsubReports();
+
+      // 2. Licznik Wanted (List Gończy)
+      const qWanted = query(collection(db, "wanted"));
+      const unsubWanted = onSnapshot(qWanted, (snap) => setWantedCount(snap.size));
+
+      return () => { unsubReports(); unsubWanted(); };
     }
   }, [userRole]);
 
@@ -126,14 +125,12 @@ export default function Home() {
     try {
       await updateDoc(doc(db, "users", uid), { displayName: newNick });
     } catch (e) {
-      console.error("Błąd edycji nicku:", e);
-      alert("Nie udało się zmienić nicku.");
+      alert("Błąd zmiany nicku.");
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Walidacja: Link nie jest już wymagany
     if (!formData.suspectNick || !formData.checkerNick) return alert("Musisz podać nick gracza i swój.");
 
     const data = {
@@ -220,7 +217,7 @@ export default function Home() {
         {historyNick && (
             <PlayerHistoryModal
                 nick={historyNick}
-                allReports={reports} // <--- TO JEST KLUCZOWE
+                allReports={reports}
                 onClose={() => setHistoryNick(null)}
             />
         )}
@@ -245,9 +242,12 @@ export default function Home() {
 
         <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
 
-          {/* LEWA KOLUMNA */}
+          {/* LEWA KOLUMNA: WIDGETY */}
           <div className="lg:col-span-1 space-y-6">
-            <PinWidget userPin={userPin} onClaim={() => {}} onCopy={(t) => navigator.clipboard.writeText(t)} />
+
+            {/* WIDGET LISTU GOŃCZEGO (Zamiast PinWidget) */}
+            <WantedWidget count={wantedCount} />
+
             <ReportForm
                 formData={formData}
                 setFormData={setFormData}
@@ -257,7 +257,7 @@ export default function Home() {
             />
           </div>
 
-          {/* PRAWA KOLUMNA */}
+          {/* PRAWA KOLUMNA: LISTA */}
           <div className="lg:col-span-3">
 
             {/* PASEK FILTRÓW */}
@@ -278,7 +278,7 @@ export default function Home() {
               </select>
             </div>
 
-            {/* LISTA KART */}
+            {/* GRID KART */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {currentReports.map((report) => (
                   <ReportCard
@@ -290,7 +290,7 @@ export default function Home() {
                       onChangeStatus={changeReportStatus}
                       onDelete={confirmDeletion}
                       onRequestDelete={requestDeletion}
-                      onOpenHistory={setHistoryNick} // PRZEKAZANIE FUNKCJI HISTORII
+                      onOpenHistory={setHistoryNick}
                   />
               ))}
             </div>

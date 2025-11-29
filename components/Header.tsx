@@ -7,8 +7,9 @@ import {
     Trophy,
     Shield,
     LogOut,
-    Settings
-} from "lucide-react"; // Import ikon
+    Settings,
+    Siren // <--- NOWA IKONA
+} from "lucide-react";
 
 interface HeaderProps {
     user: any;
@@ -30,7 +31,6 @@ export default function Header({ user, userRole, stats, onLogout, onOpenAdmin }:
             <header className="border-b border-neutral-800 bg-neutral-950/80 sticky top-0 z-40 backdrop-blur-md">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
 
-                    {/* LEWA STRONA: LOGO + MENU */}
                     <div className="flex items-center gap-8">
                         <h1 className="text-base font-bold tracking-tight text-white mr-2 flex items-center gap-2">
                             Castence
@@ -41,18 +41,24 @@ export default function Header({ user, userRole, stats, onLogout, onOpenAdmin }:
                                 <LayoutDashboard className="w-4 h-4" />
                                 Panel
                             </Link>
+
+                            {/* NOWA ZAKŁADKA LIST GOŃCZY */}
+                            <Link href="/wanted" className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-md transition">
+                                <Siren className="w-4 h-4" />
+                                List Gończy
+                            </Link>
+
                             <Link href="/notes" className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800/50 rounded-md transition">
                                 <FileText className="w-4 h-4" />
                                 Buraczki
                             </Link>
-                            <Link href="/rankings" className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800/50 rounded-md transition">
+                            <Link href="/rankings" className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-neutral-400 hover:text-yellow-400 hover:bg-yellow-400/10 rounded-md transition">
                                 <Trophy className="w-4 h-4" />
                                 Rankingi
                             </Link>
                         </nav>
                     </div>
 
-                    {/* PRAWA STRONA: STATY + USER */}
                     <div className="flex items-center gap-6">
                         <div className="hidden md:flex gap-4 text-xs text-neutral-500 border-r border-neutral-800 pr-6">
                             <div className="flex flex-col items-end leading-none gap-1">
@@ -80,20 +86,16 @@ export default function Header({ user, userRole, stats, onLogout, onOpenAdmin }:
                                 {user?.displayName}
                             </span>
 
-                            {/* USTAWIENIA */}
                             <button
                                 onClick={() => setShowSettings(true)}
                                 className="w-8 h-8 flex items-center justify-center text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-md transition"
-                                title="Ustawienia"
                             >
                                 <Settings className="w-4 h-4" />
                             </button>
 
-                            {/* WYLOGUJ */}
                             <button
                                 onClick={onLogout}
                                 className="w-8 h-8 flex items-center justify-center text-neutral-400 hover:text-red-400 hover:bg-red-900/10 rounded-md transition"
-                                title="Wyloguj"
                             >
                                 <LogOut className="w-4 h-4" />
                             </button>
