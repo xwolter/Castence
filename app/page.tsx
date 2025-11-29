@@ -285,7 +285,7 @@ export default function Home() {
             <PinWidget
                 userPin={userPin}
                 onClaim={claimPin}
-                onCopy={(t) => { navigator.clipboard.writeText(t); alert("Skopiowano!"); }}
+                onCopy={(t: string) => { navigator.clipboard.writeText(t); alert("Skopiowano!"); }}
             />
             <ReportForm
                 formData={formData}
