@@ -1,6 +1,34 @@
 import { useState } from "react";
 
-export default function AdminPanel({ onClose, usersList, changeUserRole, addPinsToDb, newPinInput, setNewPinInput, availablePinsCount, oceanApiKey, setOceanApiKey, saveApiKey, isApiKeySaved }) {
+// Definicja typów dla propsów (To naprawia błąd)
+interface AdminPanelProps {
+    onClose: () => void;
+    usersList: any[]; // Można tu dać dokładniejszy typ, ale any[] wystarczy do builda
+    changeUserRole: (uid: string, role: string) => void;
+    addPinsToDb: () => void;
+    newPinInput: string;
+    setNewPinInput: (value: string) => void;
+    availablePinsCount: number;
+    oceanApiKey: string;
+    setOceanApiKey: (value: string) => void;
+    saveApiKey: () => void;
+    isApiKeySaved: boolean;
+}
+
+export default function AdminPanel({
+                                       onClose,
+                                       usersList,
+                                       changeUserRole,
+                                       addPinsToDb,
+                                       newPinInput,
+                                       setNewPinInput,
+                                       availablePinsCount,
+                                       oceanApiKey,
+                                       setOceanApiKey,
+                                       saveApiKey,
+                                       isApiKeySaved
+                                   }: AdminPanelProps) {
+
     const [adminTab, setAdminTab] = useState("users");
 
     return (
@@ -30,7 +58,7 @@ export default function AdminPanel({ onClose, usersList, changeUserRole, addPins
                             <tr><th className="p-3 font-normal">Użytkownik</th><th className="p-3 font-normal">Ranga</th><th className="p-3 font-normal text-right">Akcje</th></tr>
                             </thead>
                             <tbody className="divide-y divide-neutral-800">
-                            {usersList.map(u => (
+                            {usersList.map((u: any) => (
                                 <tr key={u.uid} className="hover:bg-neutral-800/50">
                                     <td className="p-3">
                                         <div className="font-medium text-neutral-300">{u.displayName}</div>
