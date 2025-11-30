@@ -217,7 +217,6 @@ export default function Home() {
             <PlayerHistoryModal
                 nick={historyNick}
                 allReports={reports}
-                currentUser={user} // <--- DODAJ TO
                 onClose={() => setHistoryNick(null)}
             />
         )}
