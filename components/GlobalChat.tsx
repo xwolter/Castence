@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
-    MessageCircle, Minimize2, Send, Plus, Hash, Lock, X, ArrowLeft, Trash2, Smile, ExternalLink, BarChart2, Check // <--- DODAŁEM CHECK
+    MessageCircle, Minimize2, Send, Plus, Hash, Lock, X, ArrowLeft, Trash2, Smile, BarChart2, Check, Ban
 } from "lucide-react";
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 
@@ -148,6 +148,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         try {
             await addDoc(collection(db, "chat_channels", activeChannelId, "messages"), {
                 type: 'poll',
+                pollStatus: 'open', // <--- STATUS ANKIETY
                 question: pollQuestion,
                 options: validOptions,
                 author: user.displayName,
@@ -165,17 +166,14 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
     const handleVote = async (msgId: string, optionId: number, currentOptions: any[]) => {
         if (!activeChannelId) return;
 
-        // SPRAWDŹ CZY JUŻ GŁOSOWAŁ W TEJ ANKIECIE
-        const hasVotedInThisPoll = currentOptions.some((opt: any) => opt.votes.includes(user.uid));
+        // 1. SPRAWDZENIE CZY JUŻ GŁOSOWAŁ
+        const hasVotedAlready = currentOptions.some((opt: any) => opt.votes?.includes(user.uid));
+        if (hasVotedAlready) return;
 
-        if (hasVotedInThisPoll) {
-            return alert("Już oddałeś głos w tej ankiecie! Głos jest ostateczny.");
-        }
-
-        // Jeśli nie głosował, dodaj głos
+        // 2. DODANIE GŁOSU
         const newOptions = currentOptions.map(opt => {
             if (opt.id === optionId) {
-                return { ...opt, votes: [...opt.votes, user.uid] };
+                return { ...opt, votes: [...(opt.votes || []), user.uid] };
             }
             return opt;
         });
@@ -185,30 +183,32 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         });
     };
 
+    // NOWE: ZAKOŃCZENIE ANKIETY (TYLKO ADMIN)
+    const handleEndPoll = async (msgId: string) => {
+        if (!activeChannelId) return;
+        if (confirm("Zakończyć ankietę? Użytkownicy nie będą mogli już głosować.")) {
+            try {
+                await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", msgId), {
+                    pollStatus: 'closed'
+                });
+            } catch (e) { alert("Błąd."); }
+        }
+    };
+
     // --- FUNKCJE REAKCJI ---
 
     const onEmojiClick = async (emojiObject: any) => {
-        // Tryb dodawania reakcji do wiadomości
         if (reactingToMsgId && activeChannelId) {
             const msg = messages.find(m => m.id === reactingToMsgId);
             if (!msg) return;
 
             const currentReactions = msg.reactions || {};
             const emoji = emojiObject.emoji;
-
             let users = currentReactions[emoji] || [];
 
-            // Struktura danych w bazie: { uid: string, name: string }
-            // Sprawdzamy czy user już zareagował
             const existingIndex = users.findIndex((u: any) => u.uid === user.uid);
-
-            if (existingIndex !== -1) {
-                // Jeśli jest - usuń (toggle off)
-                users.splice(existingIndex, 1);
-            } else {
-                // Jeśli nie ma - dodaj z NICKIEM (toggle on)
-                users.push({ uid: user.uid, name: user.displayName });
-            }
+            if (existingIndex !== -1) users.splice(existingIndex, 1);
+            else users.push({ uid: user.uid, name: user.displayName });
 
             if (users.length === 0) delete currentReactions[emoji];
             else currentReactions[emoji] = users;
@@ -216,11 +216,9 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
             await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", reactingToMsgId), {
                 reactions: currentReactions
             });
-
             setReactingToMsgId(null);
             setShowEmoji(false);
         } else {
-            // Zwykłe pisanie w inpucie
             setNewMessage(prev => prev + emojiObject.emoji);
         }
     };
@@ -253,7 +251,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         else setSelectedUsers(prev => [...prev, uid]);
     };
 
-    // --- UI ---
+    // --- UI: ZWINIĘTY ---
     if (!isOpen) {
         return (
             <button onClick={() => setIsOpen(true)} className="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-110 z-50 group">
@@ -263,6 +261,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         );
     }
 
+    // --- UI: OTWARTY ---
     return (
         <div className="fixed inset-0 md:inset-auto md:bottom-6 md:right-6 z-[100] md:w-[700px] md:h-[550px] bg-[#0f0f0f] md:border border-neutral-800 md:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden font-sans animate-in slide-in-from-bottom-4 duration-200">
 
@@ -270,6 +269,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
             <div className={`w-full md:w-48 bg-[#0a0a0a] border-r border-neutral-800 flex flex-col ${activeChannelId && !isCreating ? 'hidden md:flex' : 'flex'}`}>
                 <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950 shrink-0">
                     <span className="text-xs font-black text-neutral-500 uppercase tracking-widest">KANAŁY</span>
+                    {/* Każdy może tworzyć kanał, nie tylko admin */}
                     <button onClick={() => { setIsCreating(true); setActiveChannelId(null); }} className="text-neutral-400 hover:text-white transition p-1 rounded hover:bg-neutral-800"><Plus className="w-5 h-5" /></button>
                     <button onClick={() => setIsOpen(false)} className="md:hidden text-neutral-400 p-1"><X className="w-5 h-5" /></button>
                 </div>
@@ -333,57 +333,76 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                             {!isMe && <div className="text-[10px] text-neutral-500 ml-1 mb-1 font-bold">{msg.author}</div>}
 
                                             {msg.type === 'poll' ? (
+                                                // --- ANKIETA ---
                                                 <div className="w-64 bg-neutral-900 border border-neutral-700 rounded-xl p-3">
-                                                    <h4 className="text-xs font-bold text-white mb-3">{msg.question}</h4>
-                                                    <div className="space-y-2">
-                                                        {msg.options.map((opt: any) => {
-                                                            const votes = opt.votes?.length || 0;
-                                                            const totalVotes = msg.options.reduce((acc: any, o: any) => acc + (o.votes?.length || 0), 0);
-                                                            const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
-                                                            const iVoted = opt.votes?.includes(user.uid);
-
-                                                            // Czy zagłosowałem w ogóle w tej ankiecie?
-                                                            const hasVotedAny = msg.options.some((o: any) => o.votes?.includes(user.uid));
-
-                                                            return (
-                                                                <div
-                                                                    key={opt.id}
-                                                                    onClick={() => !hasVotedAny ? handleVote(msg.id, opt.id, msg.options) : null}
-                                                                    className={`cursor-pointer group/opt ${hasVotedAny ? 'cursor-default' : ''}`}
-                                                                >
-                                                                    <div className="flex justify-between text-[10px] text-neutral-300 mb-1">
-                                                                        <span className={iVoted ? "text-indigo-400 font-bold" : ""}>{opt.text}</span>
-                                                                        <span>{votes} ({percent}%)</span>
-                                                                    </div>
-                                                                    <div className="h-2 bg-neutral-800 rounded-full overflow-hidden relative">
-                                                                        <div style={{width: `${percent}%`}} className={`h-full transition-all duration-500 ${iVoted ? 'bg-indigo-500' : 'bg-neutral-600'}`}></div>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
+                                                    <div className="flex justify-between items-start mb-3 border-b border-neutral-800 pb-2">
+                                                        <h4 className="text-xs font-bold text-white flex items-center gap-2"><BarChart2 className="w-3 h-3 text-indigo-400" /> {msg.question}</h4>
+                                                        {/* Przycisk Zakończenia (dla Admina) */}
+                                                        {userRole === 'admin' && msg.pollStatus !== 'closed' && (
+                                                            <button onClick={() => handleEndPoll(msg.id)} className="text-[9px] text-red-400 hover:text-red-300 uppercase font-bold">Zakończ</button>
+                                                        )}
+                                                        {msg.pollStatus === 'closed' && <span className="text-[9px] text-neutral-500 font-bold uppercase border border-neutral-700 px-1 rounded">Koniec</span>}
                                                     </div>
-                                                    <div className="mt-2 text-[9px] text-neutral-500 text-right">Ankieta od: {msg.author}</div>
+
+                                                    {(() => {
+                                                        const totalVotes = msg.options.reduce((acc: any, o: any) => acc + (o.votes?.length || 0), 0);
+                                                        const myVoteId = msg.options.find((o: any) => o.votes?.includes(user.uid))?.id;
+                                                        const hasVoted = myVoteId !== undefined;
+                                                        const isClosed = msg.pollStatus === 'closed';
+
+                                                        return (
+                                                            <div className="space-y-2">
+                                                                {msg.options.map((opt: any) => {
+                                                                    const votes = opt.votes?.length || 0;
+                                                                    const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
+                                                                    const isMyChoice = opt.id === myVoteId;
+
+                                                                    // Jeśli: zagłosowałem LUB ankieta zamknięta -> POKAŻ WYNIKI
+                                                                    if (hasVoted || isClosed) {
+                                                                        return (
+                                                                            <div key={opt.id} className="relative h-8 bg-neutral-800 rounded-md overflow-hidden flex items-center px-3 border border-neutral-700/50">
+                                                                                <div style={{width: `${percent}%`}} className={`absolute left-0 top-0 bottom-0 transition-all duration-700 ${isClosed ? 'bg-neutral-600/20' : (isMyChoice ? 'bg-indigo-600/60' : 'bg-neutral-600/30')}`}></div>
+                                                                                <span className={`relative text-[10px] font-bold z-10 flex-1 ${isClosed ? 'text-neutral-400' : 'text-white'}`}>{opt.text}</span>
+                                                                                <span className="relative text-[10px] font-mono text-neutral-400 z-10">{votes} ({percent}%)</span>
+                                                                                {isMyChoice && <Check className="w-3 h-3 text-white relative z-10 ml-2" />}
+                                                                            </div>
+                                                                        );
+                                                                    } else {
+                                                                        // PRZYCISKI (Tylko gdy otwarta i nie głosowałem)
+                                                                        return (
+                                                                            <button
+                                                                                key={opt.id}
+                                                                                onClick={() => handleVote(msg.id, opt.id, msg.options)}
+                                                                                className="w-full py-2 bg-neutral-800 hover:bg-indigo-600 text-white rounded-md text-xs font-medium transition border border-neutral-700 hover:border-indigo-500"
+                                                                            >
+                                                                                {opt.text}
+                                                                            </button>
+                                                                        );
+                                                                    }
+                                                                })}
+                                                                <div className="mt-2 text-[9px] text-neutral-500 text-right">Głosów: {totalVotes}</div>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
                                             ) : (
+                                                // --- WIADOMOŚĆ ---
                                                 <div className={`relative px-3.5 py-2 rounded-2xl text-xs leading-relaxed break-words ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-neutral-800 text-neutral-300 rounded-tl-none'}`}>
                                                     {isImg ? (
                                                         <a href={msg.text} target="_blank" rel="noreferrer" className="block hover:scale-105 transition"><img src={msg.text} className="max-w-[200px] max-h-[200px] rounded-lg mt-1" /></a>
                                                     ) : msg.text}
 
-                                                    {/* REAKCJE Z TOOLTIPEM NICKÓW */}
                                                     {msg.reactions && Object.keys(msg.reactions).length > 0 && (
                                                         <div className="flex flex-wrap gap-1 mt-1.5 pt-1 border-t border-white/10">
                                                             {Object.entries(msg.reactions).map(([emoji, users]: any) => {
+                                                                const userNames = users.map((u: any) => u.name).join(", ");
                                                                 const iReacted = users.some((u: any) => u.uid === user.uid);
-                                                                // Generowanie listy nicków do tooltipa
-                                                                const userNames = users.map((u: any) => u.name || "Anonim").join(", ");
-
                                                                 return (
                                                                     <button
                                                                         key={emoji}
                                                                         onClick={() => { setReactingToMsgId(msg.id); onEmojiClick({emoji}); }}
                                                                         className={`text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 transition ${iReacted ? 'bg-indigo-500/30 text-white border border-indigo-500/50' : 'bg-black/20 text-neutral-300 hover:bg-black/40'}`}
-                                                                        title={`Zareagowali: ${userNames}`} // TOOLTIP
+                                                                        title={`Zareagowali: ${userNames}`}
                                                                     >
                                                                         {emoji} {users.length}
                                                                     </button>
@@ -398,6 +417,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                                 {formatDate(msg.createdAt)}
                                             </div>
 
+                                            {/* MENU (KOSZ, REAKCJA) */}
                                             <div className={`absolute top-0 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition ${isMe ? '-left-14' : '-right-14'}`}>
                                                 <button onClick={() => { setReactingToMsgId(msg.id); setShowEmoji(true); }} className="p-1.5 bg-neutral-900 border border-neutral-700 rounded-full text-neutral-400 hover:text-yellow-400 shadow-md"><Smile className="w-3 h-3" /></button>
                                                 {canDelete && <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 bg-neutral-900 border border-neutral-700 rounded-full text-neutral-400 hover:text-red-500 shadow-md"><Trash2 className="w-3 h-3" /></button>}
@@ -410,16 +430,11 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
 
                         {activeChannelId && (
                             <div className="p-3 border-t border-neutral-800 bg-neutral-950 shrink-0 relative">
-                                {showEmoji && (
-                                    <div className="absolute bottom-16 left-0 z-50">
-                                        <div className="flex justify-end p-1 bg-[#222] rounded-t-lg"><button onClick={()=>setShowEmoji(false)}><X className="w-4 h-4 text-white"/></button></div>
-                                        <EmojiPicker theme={Theme.DARK} onEmojiClick={onEmojiClick} width={300} height={350} />
-                                    </div>
-                                )}
+                                {showEmoji && <div className="absolute bottom-16 left-0 z-50"><div className="flex justify-end p-1 bg-[#222] rounded-t-lg"><button onClick={()=>setShowEmoji(false)}><X className="w-4 h-4 text-white"/></button></div><EmojiPicker theme={Theme.DARK} onEmojiClick={onEmojiClick} width={300} height={350} /></div>}
 
                                 {isPollMode ? (
                                     <div className="bg-[#161616] border border-neutral-800 rounded-xl p-3 animate-in slide-in-from-bottom-2">
-                                        <div className="flex justify-between mb-2"><span className="text-xs font-bold text-indigo-400 uppercase">Tworzenie Ankiety</span><button onClick={() => setIsPollMode(false)}><X className="w-4 h-4 text-neutral-500 hover:text-white"/></button></div>
+                                        <div className="flex justify-between mb-2"><span className="text-xs font-bold text-indigo-400 uppercase">Nowa Ankieta</span><button onClick={() => setIsPollMode(false)}><X className="w-4 h-4 text-neutral-500 hover:text-white"/></button></div>
                                         <input className="w-full bg-neutral-900 border border-neutral-700 rounded p-2 text-xs text-white mb-2" placeholder="Pytanie..." value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} />
                                         <div className="space-y-1 max-h-24 overflow-y-auto mb-2">
                                             {pollOptions.map((opt, idx) => (
@@ -427,11 +442,13 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                             ))}
                                             <button onClick={() => setPollOptions([...pollOptions, ""])} className="text-[9px] text-indigo-400 hover:underline">+ Dodaj opcję</button>
                                         </div>
-                                        <button onClick={handleCreatePoll} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-1.5 rounded">Wyślij Ankietę</button>
+                                        <button onClick={handleCreatePoll} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-1.5 rounded">Wyślij</button>
                                     </div>
                                 ) : (
                                     <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
-                                        {userRole === 'admin' && <button type="button" onClick={() => setIsPollMode(true)} className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" title="Ankieta"><BarChart2 className="w-5 h-5" /></button>}
+                                        {/* KAŻDY MOŻE ROBIĆ ANKIETY (Poprawione) */}
+                                        <button type="button" onClick={() => setIsPollMode(true)} className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" title="Ankieta"><BarChart2 className="w-5 h-5" /></button>
+
                                         <button type="button" onClick={() => { setReactingToMsgId(null); setShowEmoji(!showEmoji); }} className={`p-2 rounded-lg transition ${showEmoji ? 'text-yellow-400' : 'text-neutral-400 hover:text-white'}`}><Smile className="w-5 h-5" /></button>
                                         <input type="text" placeholder={`Napisz na #${activeChannelName}...`} className="flex-1 bg-[#161616] border border-neutral-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500/50 outline-none transition placeholder:text-neutral-600" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}/>
                                         <button type="submit" disabled={!newMessage.trim()} className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-50 shadow-lg"><Send className="w-4 h-4"/></button>
