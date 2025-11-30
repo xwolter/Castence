@@ -15,7 +15,6 @@ import ReportForm from "@/components/ReportForm";
 import ReportCard, { Report } from "@/components/ReportCard";
 import AdminPanel from "@/components/AdminPanel";
 import PlayerHistoryModal from "@/components/PlayerHistoryModal";
-import GlobalChat from "@/components/GlobalChat"; // Import czatu
 
 export default function Home() {
   const router = useRouter();
@@ -304,9 +303,6 @@ export default function Home() {
 
           </div>
         </main>
-
-        {/* WIDGET CZATU (Dostępny dla wszystkich zalogowanych) */}
-        {user && <GlobalChat user={user} userRole={userRole} />}
 
       </div>
   );
