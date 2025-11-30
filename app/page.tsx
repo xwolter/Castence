@@ -14,6 +14,7 @@ import WantedWidget from "@/components/WantedWidget"; // <--- NOWY WIDGET
 import ReportForm from "@/components/ReportForm";
 import ReportCard, { Report } from "@/components/ReportCard";
 import AdminPanel from "@/components/AdminPanel";
+import GlobalChat from "@/components/GlobalChat"; // <--- DODAJ NA GÓRZE
 import PlayerHistoryModal from "@/components/PlayerHistoryModal";
 
 export default function Home() {
@@ -308,6 +309,9 @@ export default function Home() {
                       onOpenHistory={setHistoryNick}
                   />
               ))}
+
+              {/* WIDGET CZATU (Dostępny dla wszystkich zalogowanych) */}
+              {user && <GlobalChat user={user} />}
             </div>
 
             {/* PAGINACJA */}
