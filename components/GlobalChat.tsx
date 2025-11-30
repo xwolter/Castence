@@ -6,7 +6,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
-    MessageCircle, Minimize2, Send, Plus, Hash, Lock, X, ArrowLeft, Trash2, Smile, BarChart2, Check, Ban
+    MessageCircle, Minimize2, Send, Plus, Hash, Lock, X, ArrowLeft, Trash2, Smile, BarChart2, Check, Pin, PinOff
 } from "lucide-react";
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 
@@ -31,6 +31,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
     // UI
     const [showEmoji, setShowEmoji] = useState(false);
     const [reactingToMsgId, setReactingToMsgId] = useState<string | null>(null);
+    const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null); // Do migania po kliknięciu pinu
 
     // Kreator Kanału
     const [isCreating, setIsCreating] = useState(false);
@@ -94,8 +95,10 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
     }, [activeChannelId, isOpen]);
 
     useEffect(() => {
-        if (isOpen && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        setUnreadCount(0);
+        if (isOpen && scrollRef.current && !highlightedMsgId) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            setUnreadCount(0);
+        }
     }, [messages, isOpen]);
 
     useEffect(() => {
@@ -109,6 +112,28 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
             fetchUsers();
         }
     }, [isCreating]);
+
+    // --- FUNKCJE PRZYPINANIA (NOWE) ---
+
+    const handleTogglePin = async (msg: any) => {
+        if (!activeChannelId || userRole !== 'admin') return;
+        try {
+            await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", msg.id), {
+                isPinned: !msg.isPinned
+            });
+        } catch (e) { alert("Błąd przypinania."); }
+    };
+
+    const scrollToMessage = (msgId: string) => {
+        const element = document.getElementById(`msg-${msgId}`);
+        if (element) {
+            element.scrollIntoView({ behavior: "smooth", block: "center" });
+            setHighlightedMsgId(msgId);
+            setTimeout(() => setHighlightedMsgId(null), 2000); // Wyłącz podświetlenie po 2s
+        } else {
+            alert("Ta wiadomość jest za stara i nie ma jej w widoku.");
+        }
+    };
 
     // --- FUNKCJE WIADOMOŚCI ---
 
@@ -124,7 +149,8 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                 authorUid: user.uid,
                 authorPhoto: user.photoURL,
                 createdAt: serverTimestamp(),
-                reactions: {}
+                reactions: {},
+                isPinned: false
             });
             setNewMessage("");
             setShowEmoji(false);
@@ -138,60 +164,45 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         if (!pollQuestion.trim() || !activeChannelId) return;
 
         const validOptions = pollOptions.filter(o => o.trim() !== "").map((opt, index) => ({
-            id: index,
-            text: opt,
-            votes: [] // Tablica UID
+            id: index, text: opt, votes: []
         }));
 
-        if (validOptions.length < 2) return alert("Ankieta musi mieć min. 2 opcje.");
+        if (validOptions.length < 2) return alert("Min. 2 opcje.");
 
         try {
             await addDoc(collection(db, "chat_channels", activeChannelId, "messages"), {
                 type: 'poll',
-                pollStatus: 'open', // <--- STATUS ANKIETY
+                pollStatus: 'open',
                 question: pollQuestion,
                 options: validOptions,
                 author: user.displayName,
                 authorUid: user.uid,
                 authorPhoto: user.photoURL,
                 createdAt: serverTimestamp(),
-                reactions: {}
+                reactions: {},
+                isPinned: false
             });
-            setIsPollMode(false);
-            setPollQuestion("");
-            setPollOptions(["Tak", "Nie"]);
-        } catch (e) { alert("Błąd ankiety."); }
+            setIsPollMode(false); setPollQuestion(""); setPollOptions(["Tak", "Nie"]);
+        } catch (e) { alert("Błąd."); }
     };
 
     const handleVote = async (msgId: string, optionId: number, currentOptions: any[]) => {
         if (!activeChannelId) return;
-
-        // 1. SPRAWDZENIE CZY JUŻ GŁOSOWAŁ
         const hasVotedAlready = currentOptions.some((opt: any) => opt.votes?.includes(user.uid));
         if (hasVotedAlready) return;
 
-        // 2. DODANIE GŁOSU
         const newOptions = currentOptions.map(opt => {
-            if (opt.id === optionId) {
-                return { ...opt, votes: [...(opt.votes || []), user.uid] };
-            }
+            if (opt.id === optionId) return { ...opt, votes: [...(opt.votes || []), user.uid] };
             return opt;
         });
 
-        await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", msgId), {
-            options: newOptions
-        });
+        await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", msgId), { options: newOptions });
     };
 
-    // NOWE: ZAKOŃCZENIE ANKIETY (TYLKO ADMIN)
     const handleEndPoll = async (msgId: string) => {
         if (!activeChannelId) return;
-        if (confirm("Zakończyć ankietę? Użytkownicy nie będą mogli już głosować.")) {
-            try {
-                await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", msgId), {
-                    pollStatus: 'closed'
-                });
-            } catch (e) { alert("Błąd."); }
+        if (confirm("Zakończyć ankietę?")) {
+            await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", msgId), { pollStatus: 'closed' });
         }
     };
 
@@ -201,23 +212,16 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         if (reactingToMsgId && activeChannelId) {
             const msg = messages.find(m => m.id === reactingToMsgId);
             if (!msg) return;
-
             const currentReactions = msg.reactions || {};
             const emoji = emojiObject.emoji;
             let users = currentReactions[emoji] || [];
-
             const existingIndex = users.findIndex((u: any) => u.uid === user.uid);
             if (existingIndex !== -1) users.splice(existingIndex, 1);
             else users.push({ uid: user.uid, name: user.displayName });
-
             if (users.length === 0) delete currentReactions[emoji];
             else currentReactions[emoji] = users;
-
-            await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", reactingToMsgId), {
-                reactions: currentReactions
-            });
-            setReactingToMsgId(null);
-            setShowEmoji(false);
+            await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", reactingToMsgId), { reactions: currentReactions });
+            setReactingToMsgId(null); setShowEmoji(false);
         } else {
             setNewMessage(prev => prev + emojiObject.emoji);
         }
@@ -261,6 +265,8 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         );
     }
 
+    const pinnedMessages = messages.filter(m => m.isPinned);
+
     // --- UI: OTWARTY ---
     return (
         <div className="fixed inset-0 md:inset-auto md:bottom-6 md:right-6 z-[100] md:w-[700px] md:h-[550px] bg-[#0f0f0f] md:border border-neutral-800 md:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden font-sans animate-in slide-in-from-bottom-4 duration-200">
@@ -269,7 +275,6 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
             <div className={`w-full md:w-48 bg-[#0a0a0a] border-r border-neutral-800 flex flex-col ${activeChannelId && !isCreating ? 'hidden md:flex' : 'flex'}`}>
                 <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950 shrink-0">
                     <span className="text-xs font-black text-neutral-500 uppercase tracking-widest">KANAŁY</span>
-                    {/* Każdy może tworzyć kanał, nie tylko admin */}
                     <button onClick={() => { setIsCreating(true); setActiveChannelId(null); }} className="text-neutral-400 hover:text-white transition p-1 rounded hover:bg-neutral-800"><Plus className="w-5 h-5" /></button>
                     <button onClick={() => setIsOpen(false)} className="md:hidden text-neutral-400 p-1"><X className="w-5 h-5" /></button>
                 </div>
@@ -312,11 +317,28 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                     </div>
                 ) : (
                     <>
-                        <div className="h-14 border-b border-neutral-800 flex items-center px-4 gap-3 bg-neutral-950/50 shrink-0 z-10">
-                            <button onClick={() => setActiveChannelId(null)} className="md:hidden text-neutral-400 hover:text-white mr-1"><ArrowLeft className="w-5 h-5" /></button>
-                            <Hash className="w-4 h-4 text-neutral-600" />
-                            <h3 className="text-sm font-bold text-white truncate">{activeChannelName || "Wybierz kanał"}</h3>
-                            <button onClick={() => setIsOpen(false)} className="md:hidden ml-auto text-neutral-500"><X className="w-5 h-5"/></button>
+                        {/* HEADER CZATU */}
+                        <div className="border-b border-neutral-800 flex flex-col shrink-0 z-10">
+                            <div className="h-14 flex items-center px-4 gap-3 bg-neutral-950/50">
+                                <button onClick={() => setActiveChannelId(null)} className="md:hidden text-neutral-400 hover:text-white mr-1"><ArrowLeft className="w-5 h-5" /></button>
+                                <Hash className="w-4 h-4 text-neutral-600" />
+                                <h3 className="text-sm font-bold text-white truncate flex-1">{activeChannelName || "Wybierz kanał"}</h3>
+                                <button onClick={() => setIsOpen(false)} className="md:hidden text-neutral-500"><X className="w-5 h-5"/></button>
+                            </div>
+
+                            {/* --- PASEK PRZYPIĘTYCH (NOWE) --- */}
+                            {pinnedMessages.length > 0 && (
+                                <div
+                                    onClick={() => scrollToMessage(pinnedMessages[0].id)}
+                                    className="flex items-center gap-2 px-4 py-2 bg-neutral-900/50 border-t border-neutral-800 cursor-pointer hover:bg-neutral-900 transition"
+                                >
+                                    <Pin className="w-3 h-3 text-indigo-400 rotate-45" />
+                                    <div className="text-[10px] text-neutral-300 truncate flex-1 font-medium">
+                                        <span className="font-bold text-neutral-500 mr-1">{pinnedMessages[0].author}:</span>
+                                        {pinnedMessages[0].text || (pinnedMessages[0].type === 'poll' ? `Ankieta: ${pinnedMessages[0].question}` : 'Obrazek')}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar relative z-0 pb-20 md:pb-4">
@@ -324,20 +346,30 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                 const isMe = user.uid === msg.authorUid;
                                 const canDelete = userRole === 'admin' || isMe;
                                 const isImg = isImageUrl(msg.text);
+                                const isHighlighted = highlightedMsgId === msg.id; // Miganie po kliknięciu pinu
 
                                 return (
-                                    <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''} group/msg`}>
+                                    <div
+                                        key={msg.id}
+                                        id={`msg-${msg.id}`} // ID do scrollowania
+                                        className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''} group/msg transition-colors duration-500 ${isHighlighted ? 'bg-indigo-500/20 p-2 rounded-xl -mx-2' : ''}`}
+                                    >
                                         <img src={msg.authorPhoto} className="w-8 h-8 rounded-lg bg-neutral-800 object-cover self-start mt-1" />
 
                                         <div className={`max-w-[80%] relative flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                                             {!isMe && <div className="text-[10px] text-neutral-500 ml-1 mb-1 font-bold">{msg.author}</div>}
 
+                                            {/* PRZYPIĘTA IKONA */}
+                                            {msg.isPinned && (
+                                                <div className={`absolute -top-3 ${isMe ? 'right-0' : 'left-0'} text-indigo-400`}>
+                                                    <Pin className="w-3 h-3 rotate-45 fill-indigo-400/20" />
+                                                </div>
+                                            )}
+
                                             {msg.type === 'poll' ? (
-                                                // --- ANKIETA ---
                                                 <div className="w-64 bg-neutral-900 border border-neutral-700 rounded-xl p-3">
                                                     <div className="flex justify-between items-start mb-3 border-b border-neutral-800 pb-2">
                                                         <h4 className="text-xs font-bold text-white flex items-center gap-2"><BarChart2 className="w-3 h-3 text-indigo-400" /> {msg.question}</h4>
-                                                        {/* Przycisk Zakończenia (dla Admina) */}
                                                         {userRole === 'admin' && msg.pollStatus !== 'closed' && (
                                                             <button onClick={() => handleEndPoll(msg.id)} className="text-[9px] text-red-400 hover:text-red-300 uppercase font-bold">Zakończ</button>
                                                         )}
@@ -357,7 +389,6 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                                                     const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
                                                                     const isMyChoice = opt.id === myVoteId;
 
-                                                                    // Jeśli: zagłosowałem LUB ankieta zamknięta -> POKAŻ WYNIKI
                                                                     if (hasVoted || isClosed) {
                                                                         return (
                                                                             <div key={opt.id} className="relative h-8 bg-neutral-800 rounded-md overflow-hidden flex items-center px-3 border border-neutral-700/50">
@@ -368,15 +399,8 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                                                             </div>
                                                                         );
                                                                     } else {
-                                                                        // PRZYCISKI (Tylko gdy otwarta i nie głosowałem)
                                                                         return (
-                                                                            <button
-                                                                                key={opt.id}
-                                                                                onClick={() => handleVote(msg.id, opt.id, msg.options)}
-                                                                                className="w-full py-2 bg-neutral-800 hover:bg-indigo-600 text-white rounded-md text-xs font-medium transition border border-neutral-700 hover:border-indigo-500"
-                                                                            >
-                                                                                {opt.text}
-                                                                            </button>
+                                                                            <button key={opt.id} onClick={() => handleVote(msg.id, opt.id, msg.options)} className="w-full py-2 bg-neutral-800 hover:bg-indigo-600 text-white rounded-md text-xs font-medium transition border border-neutral-700 hover:border-indigo-500">{opt.text}</button>
                                                                         );
                                                                     }
                                                                 })}
@@ -386,7 +410,6 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                                     })()}
                                                 </div>
                                             ) : (
-                                                // --- WIADOMOŚĆ ---
                                                 <div className={`relative px-3.5 py-2 rounded-2xl text-xs leading-relaxed break-words ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-neutral-800 text-neutral-300 rounded-tl-none'}`}>
                                                     {isImg ? (
                                                         <a href={msg.text} target="_blank" rel="noreferrer" className="block hover:scale-105 transition"><img src={msg.text} className="max-w-[200px] max-h-[200px] rounded-lg mt-1" /></a>
@@ -417,9 +440,21 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                                 {formatDate(msg.createdAt)}
                                             </div>
 
-                                            {/* MENU (KOSZ, REAKCJA) */}
-                                            <div className={`absolute top-0 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition ${isMe ? '-left-14' : '-right-14'}`}>
+                                            {/* MENU AKCJI */}
+                                            <div className={`absolute top-0 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition ${isMe ? '-left-20' : '-right-20'}`}>
+                                                {/* PRZYPINANIE (ADMIN) */}
+                                                {userRole === 'admin' && (
+                                                    <button
+                                                        onClick={() => handleTogglePin(msg)}
+                                                        className={`p-1.5 bg-neutral-900 border border-neutral-700 rounded-full shadow-md ${msg.isPinned ? 'text-indigo-400' : 'text-neutral-400 hover:text-white'}`}
+                                                        title={msg.isPinned ? "Odepnij" : "Przypnij"}
+                                                    >
+                                                        {msg.isPinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+                                                    </button>
+                                                )}
+
                                                 <button onClick={() => { setReactingToMsgId(msg.id); setShowEmoji(true); }} className="p-1.5 bg-neutral-900 border border-neutral-700 rounded-full text-neutral-400 hover:text-yellow-400 shadow-md"><Smile className="w-3 h-3" /></button>
+
                                                 {canDelete && <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 bg-neutral-900 border border-neutral-700 rounded-full text-neutral-400 hover:text-red-500 shadow-md"><Trash2 className="w-3 h-3" /></button>}
                                             </div>
                                         </div>
@@ -446,9 +481,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                     </div>
                                 ) : (
                                     <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
-                                        {/* KAŻDY MOŻE ROBIĆ ANKIETY (Poprawione) */}
-                                        <button type="button" onClick={() => setIsPollMode(true)} className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" title="Ankieta"><BarChart2 className="w-5 h-5" /></button>
-
+                                        {userRole === 'admin' && <button type="button" onClick={() => setIsPollMode(true)} className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" title="Ankieta"><BarChart2 className="w-5 h-5" /></button>}
                                         <button type="button" onClick={() => { setReactingToMsgId(null); setShowEmoji(!showEmoji); }} className={`p-2 rounded-lg transition ${showEmoji ? 'text-yellow-400' : 'text-neutral-400 hover:text-white'}`}><Smile className="w-5 h-5" /></button>
                                         <input type="text" placeholder={`Napisz na #${activeChannelName}...`} className="flex-1 bg-[#161616] border border-neutral-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500/50 outline-none transition placeholder:text-neutral-600" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}/>
                                         <button type="submit" disabled={!newMessage.trim()} className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-50 shadow-lg"><Send className="w-4 h-4"/></button>

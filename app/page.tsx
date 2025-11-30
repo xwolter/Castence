@@ -259,7 +259,15 @@ export default function Home() {
           <div className="lg:col-span-3">
 
             {/* FILTRY */}
-            <div className="flex flex-col sm:flex-row gap-3 mb-6">
+            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+              {/* PAGINACJA */}
+              {totalPages > 1 && (
+                  <div className="flex justify-center gap-2 ">
+                    <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 transition">Poprzednia</button>
+                    <span className="px-4 py-2 text-xs text-neutral-500 border border-neutral-800 rounded-lg bg-neutral-900 font-mono">{currentPage} / {totalPages}</span>
+                    <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 transition">Następna</button>
+                  </div>
+              )}
               <div className="flex-1">
                 <input type="text" placeholder="Szukaj (nick, discord, id)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 bg-[#0f0f0f] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white transition placeholder:text-neutral-600" />
               </div>
@@ -294,14 +302,6 @@ export default function Home() {
               ))}
             </div>
 
-            {/* PAGINACJA */}
-            {totalPages > 1 && (
-                <div className="flex justify-center gap-2 mt-8">
-                  <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 transition">Poprzednia</button>
-                  <span className="px-4 py-2 text-xs text-neutral-500 border border-neutral-800 rounded-lg bg-neutral-900 font-mono">{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 transition">Następna</button>
-                </div>
-            )}
           </div>
         </main>
 
