@@ -131,24 +131,37 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Walidacja: Link nie jest już wymagany
     if (!formData.suspectNick || !formData.checkerNick) return alert("Musisz podać nick gracza i swój.");
 
-    const data = {
-      ...formData,
-      createdAt: serverTimestamp(),
-      authorRealName: user?.displayName,
-      authorEmail: user?.email,
-      authorUid: user?.uid,
-      authorPhoto: user?.photoURL,
-      status: "pending",
-      deletionRequested: false
+    const baseData = {
+      suspectNick: formData.suspectNick,
+      discordId: formData.discordId,
+      checkerNick: formData.checkerNick,
+      evidenceLink: formData.evidenceLink,
+      description: formData.description,
     };
 
     try {
       if (editId) {
-        await updateDoc(doc(db, "reports", editId), data);
+        // --- TRYB EDYCJI (Dodajemy info o edycji) ---
+        await updateDoc(doc(db, "reports", editId), {
+          ...baseData,
+          lastEditedBy: user?.displayName, // Kto edytował
+          lastEditedAt: serverTimestamp()  // Kiedy
+        });
       } else {
-        await addDoc(collection(db, "reports"), data);
+        // --- TRYB DODAWANIA (Nowy wpis) ---
+        await addDoc(collection(db, "reports"), {
+          ...baseData,
+          createdAt: serverTimestamp(),
+          authorRealName: user?.displayName,
+          authorEmail: user?.email,
+          authorUid: user?.uid,
+          authorPhoto: user?.photoURL,
+          status: "pending",
+          deletionRequested: false
+        });
       }
       setEditId(null);
       setFormData({suspectNick:"", discordId:"", checkerNick: user?.displayName || "", evidenceLink:"", description:""});
@@ -287,6 +300,7 @@ export default function Home() {
                       report={report}
                       userRole={userRole}
                       userId={user.uid}
+                      user={user}
                       onEdit={handleEditClick}
                       onChangeStatus={changeReportStatus}
                       onDelete={confirmDeletion}
