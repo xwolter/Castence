@@ -6,8 +6,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
-    MessageCircle, Minimize2, Send, Plus, Hash, Lock, Check, Trash2,
-    Smile, X, ArrowLeft
+    MessageCircle, Minimize2, Send, Plus, Hash, Lock, X, ArrowLeft, Trash2, Smile, User
 } from "lucide-react";
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 
@@ -46,7 +45,9 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
     useEffect(() => {
         const q = query(collection(db, "chat_channels"), orderBy("createdAt", "asc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const allChannels = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            // Rzutowanie na any, żeby nie krzyczał o typy
+            const allChannels = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+
             const myChannels = allChannels.filter((ch: any) =>
                 !ch.isPrivate ||
                 (ch.allowedUsers && ch.allowedUsers.includes(user.uid)) ||
@@ -54,6 +55,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                 userRole === 'admin'
             );
             setChannels(myChannels);
+
             if (!activeChannelId && myChannels.length > 0) {
                 setActiveChannelId(myChannels[0].id);
                 setActiveChannelName(myChannels[0].name);
@@ -80,7 +82,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         setUnreadCount(0);
     }, [messages, isOpen]);
 
-    // Ładowanie userów do kreatora
+    // Ładowanie userów
     useEffect(() => {
         if (isCreating) {
             const fetchUsers = async () => {
@@ -139,6 +141,18 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         if (confirm("Usunąć kanał?")) await deleteDoc(doc(db, "chat_channels", channelId));
     };
 
+    // --- NOWE: USUWANIE WIADOMOŚCI ---
+    const handleDeleteMessage = async (msgId: string) => {
+        if (!activeChannelId) return;
+        if (confirm("Usunąć tę wiadomość?")) {
+            try {
+                await deleteDoc(doc(db, "chat_channels", activeChannelId, "messages", msgId));
+            } catch (e) {
+                alert("Błąd usuwania wiadomości.");
+            }
+        }
+    };
+
     // --- UI: ZWINIĘTY ---
     if (!isOpen) {
         return (
@@ -156,23 +170,17 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         );
     }
 
-    // --- UI: OTWARTY (RESPONSYWNY) ---
+    // --- UI: OTWARTY ---
     return (
         <div className="fixed inset-0 md:inset-auto md:bottom-6 md:right-6 z-[100] md:w-[700px] md:h-[550px] bg-[#0f0f0f] md:border border-neutral-800 md:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden font-sans animate-in slide-in-from-bottom-4 duration-200">
 
-            {/* SIDEBAR (Lista Kanałów) */}
-            {/* Na mobile: Sidebar znika jak jesteś w czacie, chyba że klikniesz "wróć" */}
+            {/* SIDEBAR */}
             <div className={`w-full md:w-48 bg-[#0a0a0a] border-r border-neutral-800 flex flex-col ${activeChannelId && !isCreating ? 'hidden md:flex' : 'flex'}`}>
-
-                {/* Header Sidebara */}
                 <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950 shrink-0">
                     <span className="text-xs font-black text-neutral-500 uppercase tracking-widest">KANAŁY</span>
                     <button onClick={() => { setIsCreating(true); setActiveChannelId(null); }} className="text-neutral-400 hover:text-white transition p-1 rounded hover:bg-neutral-800"><Plus className="w-5 h-5" /></button>
-
-                    {/* Przycisk zamknięcia na mobile w sidebarze */}
                     <button onClick={() => setIsOpen(false)} className="md:hidden text-neutral-400 p-1"><X className="w-5 h-5" /></button>
                 </div>
-
                 <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
                     {channels.map(ch => {
                         const canDelete = !ch.isSystem && (ch.createdByUid === user.uid || userRole === 'admin');
@@ -187,22 +195,18 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                         );
                     })}
                 </div>
-
-                {/* Przycisk Schowaj (tylko desktop) */}
                 <div className="hidden md:block p-2 bg-neutral-950 border-t border-neutral-800 shrink-0">
                     <button onClick={() => setIsOpen(false)} className="w-full flex items-center justify-center gap-2 text-neutral-500 hover:text-white p-2 rounded text-xs hover:bg-neutral-900 transition"><Minimize2 className="w-3 h-3" /> Schowaj</button>
                 </div>
             </div>
 
-            {/* GŁÓWNY OBSZAR CZATU */}
+            {/* GŁÓWNY OBSZAR */}
             <div className={`flex-1 flex flex-col relative bg-[#0f0f0f] ${(!activeChannelId && !isCreating) ? 'hidden md:flex' : 'flex'}`}>
 
-                {/* KREATOR KANAŁU */}
                 {isCreating ? (
                     <div className="flex-1 p-6 flex flex-col h-full">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-sm font-bold text-white">Nowy Kanał</h3>
-                            {/* Na mobile wróć do listy */}
                             <button onClick={() => setIsCreating(false)} className="text-neutral-500"><ArrowLeft className="md:hidden w-5 h-5" /><X className="hidden md:block w-5 h-5" /></button>
                         </div>
                         <form onSubmit={handleCreateChannel} className="flex flex-col gap-4 flex-1 overflow-hidden">
@@ -215,30 +219,42 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                         </form>
                     </div>
                 ) : (
-                    /* WIDOK CZATU */
+                    /* CZAT */
                     <>
                         <div className="h-14 border-b border-neutral-800 flex items-center px-4 gap-3 bg-neutral-950/50 shrink-0 z-10">
-                            {/* Przycisk powrotu na mobile */}
                             <button onClick={() => setActiveChannelId(null)} className="md:hidden text-neutral-400 hover:text-white mr-1"><ArrowLeft className="w-5 h-5" /></button>
-
                             <Hash className="w-4 h-4 text-neutral-600" />
                             <h3 className="text-sm font-bold text-white truncate">{activeChannelName || "Wybierz kanał"}</h3>
-
-                            {/* Zamknięcie na mobile w widoku czatu */}
                             <button onClick={() => setIsOpen(false)} className="md:hidden ml-auto text-neutral-500"><X className="w-5 h-5"/></button>
                         </div>
 
                         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar relative z-0 pb-20 md:pb-4">
                             {messages.map((msg) => {
                                 const isMe = user.uid === msg.authorUid;
+                                // Czy użytkownik może usunąć? (Admin LUB Autor wiadomości)
+                                const canDelete = userRole === 'admin' || isMe;
+
                                 return (
-                                    <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
+                                    <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''} group/msg`}>
                                         <img src={msg.authorPhoto} className="w-8 h-8 rounded-lg bg-neutral-800 object-cover self-start mt-1" />
-                                        <div className={`max-w-[80%]`}>
-                                            {!isMe && <div className="text-[10px] text-neutral-500 ml-1 mb-1 font-bold">{msg.author}</div>}
-                                            <div className={`px-3.5 py-2 rounded-2xl text-xs leading-relaxed break-words ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-neutral-800 text-neutral-300 rounded-tl-none'}`}>
+                                        <div className={`max-w-[80%] relative`}>
+                                            {/* NICK NAD WIADOMOŚCIĄ (Dla innych) */}
+                                            {!isMe && <div className="text-[10px] text-neutral-400 ml-1 mb-1 font-bold">{msg.author}</div>}
+
+                                            <div className={`px-3.5 py-2 rounded-2xl text-xs leading-relaxed break-words relative ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-neutral-800 text-neutral-300 rounded-tl-none'}`}>
                                                 {msg.text}
                                             </div>
+
+                                            {/* PRZYCISK USUWANIA */}
+                                            {canDelete && (
+                                                <button
+                                                    onClick={() => handleDeleteMessage(msg.id)}
+                                                    className={`absolute top-1/2 -translate-y-1/2 p-1.5 bg-neutral-900 border border-neutral-700 rounded-full text-neutral-500 hover:text-red-500 opacity-0 group-hover/msg:opacity-100 transition shadow-md ${isMe ? '-left-8' : '-right-8'}`}
+                                                    title="Usuń wiadomość"
+                                                >
+                                                    <Trash2 className="w-3 h-3" />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -251,7 +267,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
 
                                 <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
                                     <button type="button" onClick={() => setShowEmoji(!showEmoji)} className={`p-2 rounded-lg transition ${showEmoji ? 'text-yellow-400' : 'text-neutral-400 hover:text-white'}`}><Smile className="w-5 h-5" /></button>
-                                    <input type="text" placeholder={`Napisz na #${activeChannelName}...`} className="flex-1 bg-[#161616] border border-neutral-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500/50 outline-none" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}/>
+                                    <input type="text" placeholder={`Napisz na #${activeChannelName}...`} className="flex-1 bg-[#161616] border border-neutral-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500/50 outline-none transition placeholder:text-neutral-600" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}/>
                                     <button type="submit" disabled={!newMessage.trim()} className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-50 shadow-lg"><Send className="w-4 h-4"/></button>
                                 </form>
                             </div>
