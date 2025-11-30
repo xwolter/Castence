@@ -1,8 +1,20 @@
 import { useState } from "react";
 import {
-    ExternalLink, Trash2, Pencil, CheckCircle, Ban, Clock, AlertTriangle, Copy, User, FileX, Info
+    ExternalLink,
+    Trash2,
+    Pencil,
+    CheckCircle,
+    Ban,
+    Clock,
+    AlertTriangle,
+    Copy,
+    User,
+    FileX,
+    Info,
+    Lock // <--- Nowa ikona
 } from "lucide-react";
 
+// --- TYPY DANYCH ---
 export interface Report {
     id: string;
     suspectNick: string;
@@ -25,7 +37,7 @@ interface ReportCardProps {
     onChangeStatus: (id: string, status: string) => void;
     onDelete: (id: string, cancel?: boolean) => void;
     onRequestDelete: (id: string) => void;
-    onOpenHistory: (nick: string) => void; // <--- NOWY PROP
+    onOpenHistory: (nick: string) => void;
 }
 
 export default function ReportCard({
@@ -36,7 +48,7 @@ export default function ReportCard({
                                        onChangeStatus,
                                        onDelete,
                                        onRequestDelete,
-                                       onOpenHistory // <--- ODBIERAMY GO
+                                       onOpenHistory
                                    }: ReportCardProps) {
 
     const [expanded, setExpanded] = useState(false);
@@ -49,11 +61,31 @@ export default function ReportCard({
         setTimeout(() => setCopiedDc(false), 2000);
     };
 
+    // --- LOGIKA BLOKADY DLA MEMBERA ---
+    const isMember = userRole === 'member';
+    // Member może edytować tylko jeśli status to "pending"
+    const canChangeStatus = userRole === 'admin' || (isMember && report.status === 'pending');
+
+    const handleStatusClick = (newStatus: string) => {
+        // Jeśli member próbuje zmienić, pytamy o potwierdzenie
+        if (isMember) {
+            if (window.confirm("Czy na pewno chcesz ustawić ten status? Jako Członek nie będziesz mógł tego cofnąć.")) {
+                onChangeStatus(report.id, newStatus);
+            }
+        } else {
+            // Admin zmienia bez pytania
+            onChangeStatus(report.id, newStatus);
+        }
+    };
+
     const renderStatus = () => {
         switch (report.status) {
-            case 'banned': return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/20 border border-red-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-red-900/10"><Ban className="w-3 h-3" /> Zbanowany</span>;
-            case 'clean': return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/20 border border-emerald-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-emerald-900/10"><CheckCircle className="w-3 h-3" /> Czysty</span>;
-            default: return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-yellow-500 bg-yellow-950/20 border border-yellow-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-yellow-900/10"><Clock className="w-3 h-3" /> Oczekuje</span>;
+            case 'banned':
+                return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/20 border border-red-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-red-900/10"><Ban className="w-3 h-3" /> Zbanowany</span>;
+            case 'clean':
+                return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/20 border border-emerald-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-emerald-900/10"><CheckCircle className="w-3 h-3" /> Czysty</span>;
+            default:
+                return <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-yellow-500 bg-yellow-950/20 border border-yellow-900/40 px-2.5 py-1 rounded-md shadow-sm shadow-yellow-900/10"><Clock className="w-3 h-3" /> Oczekuje</span>;
         }
     };
 
@@ -78,7 +110,6 @@ export default function ReportCard({
 
                         <div>
                             <div className="flex flex-wrap items-center gap-2">
-                                {/* INTERAKTYWNY NICK - OTWIERA KARTOTEKĘ */}
                                 <button
                                     onClick={() => onOpenHistory(report.suspectNick)}
                                     className="text-base font-bold text-white tracking-tight hover:text-blue-400 hover:underline decoration-blue-500/50 underline-offset-4 transition flex items-center gap-1.5 group/nick"
@@ -134,20 +165,44 @@ export default function ReportCard({
                 )}
 
                 <div className="flex items-center gap-1 pl-2 border-l border-neutral-800/50">
+
+                    {/* --- EDYCJA (ADMIN) --- */}
                     {userRole === "admin" && <IconButton onClick={() => onEdit(report)} icon={<Pencil className="w-3.5 h-3.5" />} tip="Edytuj wpis" />}
-                    {(userRole === "admin" || userRole === "member") && (
-                        <div className="flex items-center gap-0.5 bg-neutral-900/80 rounded-lg border border-neutral-800 p-0.5 mx-1">
-                            <StatusButton active={report.status === 'clean'} onClick={() => onChangeStatus(report.id, 'clean')} color="text-emerald-500 hover:bg-emerald-950" icon={<CheckCircle className="w-3.5 h-3.5" />} title="Czysty" />
-                            <StatusButton active={report.status === 'banned'} onClick={() => onChangeStatus(report.id, 'banned')} color="text-red-500 hover:bg-red-950" icon={<Ban className="w-3.5 h-3.5" />} title="Ban" />
-                            <StatusButton active={report.status === 'pending'} onClick={() => onChangeStatus(report.id, 'pending')} color="text-yellow-500 hover:bg-yellow-950" icon={<Clock className="w-3.5 h-3.5" />} title="Oczekuje" />
+
+                    {/* --- STATUSY (Z LOGIKĄ BLOKADY) --- */}
+                    {canChangeStatus ? (
+                        <div className="flex flex-col items-end gap-1 relative group/status">
+                            {/* Ostrzeżenie dla membera */}
+                            {isMember && (
+                                <span className="absolute bottom-full right-0 mb-1 text-[9px] text-neutral-500 bg-neutral-900 border border-neutral-800 px-2 py-1 rounded opacity-0 group-hover/status:opacity-100 transition whitespace-nowrap pointer-events-none z-10">
+                                    Możesz wybrać tylko raz!
+                                </span>
+                            )}
+
+                            <div className="flex items-center gap-0.5 bg-neutral-900/80 rounded-lg border border-neutral-800 p-0.5 mx-1">
+                                <StatusButton active={report.status === 'clean'} onClick={() => handleStatusClick('clean')} color="text-emerald-500 hover:bg-emerald-950" icon={<CheckCircle className="w-3.5 h-3.5" />} title="Czysty (Decyzja ostateczna)" />
+                                <StatusButton active={report.status === 'banned'} onClick={() => handleStatusClick('banned')} color="text-red-500 hover:bg-red-950" icon={<Ban className="w-3.5 h-3.5" />} title="Ban (Decyzja ostateczna)" />
+                                {userRole === 'admin' && (
+                                    <StatusButton active={report.status === 'pending'} onClick={() => handleStatusClick('pending')} color="text-yellow-500 hover:bg-yellow-950" icon={<Clock className="w-3.5 h-3.5" />} title="Cofnij do Oczekujących" />
+                                )}
+                            </div>
                         </div>
+                    ) : (
+                        // JEŚLI ZABLOKOWANE DLA MEMBERA:
+                        isMember && (
+                            <div className="flex items-center gap-1 px-2 py-1 text-neutral-600 text-[10px] font-bold uppercase tracking-wider border border-neutral-800 rounded bg-neutral-900/50 select-none">
+                                <Lock className="w-3 h-3" /> Zatwierdzone
+                            </div>
+                        )
                     )}
+
+                    {/* --- USUWANIE --- */}
                     <div className="ml-2">
                         {userRole === "admin" ? (
                             <IconButton onClick={() => onDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-500 hover:bg-red-950/20" tip="Usuń trwale" />
                         ) : (
                             report.authorUid === userId && !report.deletionRequested && (
-                                <IconButton onClick={() => onRequestDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-400 hover:bg-red-950/20" tip="Zgłoś usunięcie" />
+                                <IconButton onClick={() => onRequestDelete(report.id)} icon={<Trash2 className="w-3.5 h-3.5" />} color="text-neutral-500 hover:text-red-400 hover:bg-red-950/20" tip="Zgłoś do usunięcia" />
                             )
                         )}
                     </div>
