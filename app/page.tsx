@@ -10,12 +10,12 @@ import {
 
 // IMPORT KOMPONENTÓW
 import Header from "@/components/Header";
-import WantedWidget from "@/components/WantedWidget"; // <--- NOWY WIDGET
+import WantedWidget from "@/components/WantedWidget";
 import ReportForm from "@/components/ReportForm";
 import ReportCard, { Report } from "@/components/ReportCard";
 import AdminPanel from "@/components/AdminPanel";
-import GlobalChat from "@/components/GlobalChat"; // <--- DODAJ NA GÓRZE
 import PlayerHistoryModal from "@/components/PlayerHistoryModal";
+import GlobalChat from "@/components/GlobalChat"; // Import czatu
 
 export default function Home() {
   const router = useRouter();
@@ -28,7 +28,7 @@ export default function Home() {
   const [reports, setReports] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
 
-  // Stan dla licznika Wanted
+  // Licznik Wanted
   const [wantedCount, setWantedCount] = useState(0);
 
   // Modale
@@ -61,7 +61,6 @@ export default function Home() {
       if (currentUser) {
         setFormData(prev => ({ ...prev, checkerNick: currentUser.displayName || "" }));
 
-        // Sprawdzanie Roli
         if (currentUser.email === OWNER_EMAIL) {
           setUserRole("admin");
           await setDoc(doc(db, "users", currentUser.uid), {
@@ -95,13 +94,13 @@ export default function Home() {
   useEffect(() => {
     if (userRole === "member" || userRole === "admin") {
 
-      // 1. Raporty
+      // Raporty
       const qReports = query(collection(db, "reports"), orderBy("createdAt", "desc"));
       const unsubReports = onSnapshot(qReports, (snapshot) => {
         setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
 
-      // 2. Licznik Wanted (List Gończy)
+      // Licznik Wanted
       const qWanted = query(collection(db, "wanted"));
       const unsubWanted = onSnapshot(qWanted, (snap) => setWantedCount(snap.size));
 
@@ -132,37 +131,24 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Walidacja: Link nie jest już wymagany
     if (!formData.suspectNick || !formData.checkerNick) return alert("Musisz podać nick gracza i swój.");
 
-    const baseData = {
-      suspectNick: formData.suspectNick,
-      discordId: formData.discordId,
-      checkerNick: formData.checkerNick,
-      evidenceLink: formData.evidenceLink,
-      description: formData.description,
+    const data = {
+      ...formData,
+      createdAt: serverTimestamp(),
+      authorRealName: user?.displayName,
+      authorEmail: user?.email,
+      authorUid: user?.uid,
+      authorPhoto: user?.photoURL,
+      status: "pending",
+      deletionRequested: false
     };
 
     try {
       if (editId) {
-        // --- TRYB EDYCJI (Dodajemy info o edycji) ---
-        await updateDoc(doc(db, "reports", editId), {
-          ...baseData,
-          lastEditedBy: user?.displayName, // Kto edytował
-          lastEditedAt: serverTimestamp()  // Kiedy
-        });
+        await updateDoc(doc(db, "reports", editId), data);
       } else {
-        // --- TRYB DODAWANIA (Nowy wpis) ---
-        await addDoc(collection(db, "reports"), {
-          ...baseData,
-          createdAt: serverTimestamp(),
-          authorRealName: user?.displayName,
-          authorEmail: user?.email,
-          authorUid: user?.uid,
-          authorPhoto: user?.photoURL,
-          status: "pending",
-          deletionRequested: false
-        });
+        await addDoc(collection(db, "reports"), data);
       }
       setEditId(null);
       setFormData({suspectNick:"", discordId:"", checkerNick: user?.displayName || "", evidenceLink:"", description:""});
@@ -252,17 +238,14 @@ export default function Home() {
             stats={stats}
             onLogout={() => signOut(auth)}
             onOpenAdmin={() => setShowAdminPanel(true)}
-            onSearchPlayer={(nick) => setHistoryNick(nick)} // <--- DODAJ TO!
+            onSearchPlayer={setHistoryNick}
         />
 
         <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
 
-          {/* LEWA KOLUMNA: WIDGETY */}
+          {/* LEWA KOLUMNA */}
           <div className="lg:col-span-1 space-y-6">
-
-            {/* WIDGET LISTU GOŃCZEGO (Zamiast PinWidget) */}
             <WantedWidget count={wantedCount} />
-
             <ReportForm
                 formData={formData}
                 setFormData={setFormData}
@@ -272,10 +255,10 @@ export default function Home() {
             />
           </div>
 
-          {/* PRAWA KOLUMNA: LISTA */}
+          {/* PRAWA KOLUMNA */}
           <div className="lg:col-span-3">
 
-            {/* PASEK FILTRÓW */}
+            {/* FILTRY */}
             <div className="flex flex-col sm:flex-row gap-3 mb-6">
               <div className="flex-1">
                 <input type="text" placeholder="Szukaj (nick, discord, id)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 bg-[#0f0f0f] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white transition placeholder:text-neutral-600" />
@@ -293,7 +276,7 @@ export default function Home() {
               </select>
             </div>
 
-            {/* GRID KART */}
+            {/* LISTA */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {currentReports.map((report) => (
                   <ReportCard
@@ -301,7 +284,7 @@ export default function Home() {
                       report={report}
                       userRole={userRole}
                       userId={user.uid}
-                      user={user}
+                      user={user} // <--- WAŻNE DLA KOMENTARZY
                       onEdit={handleEditClick}
                       onChangeStatus={changeReportStatus}
                       onDelete={confirmDeletion}
@@ -309,9 +292,6 @@ export default function Home() {
                       onOpenHistory={setHistoryNick}
                   />
               ))}
-
-              {/* WIDGET CZATU (Dostępny dla wszystkich zalogowanych) */}
-              {user && <GlobalChat user={user} />}
             </div>
 
             {/* PAGINACJA */}
@@ -324,6 +304,10 @@ export default function Home() {
             )}
           </div>
         </main>
+
+        {/* WIDGET CZATU (Dostępny dla wszystkich zalogowanych) */}
+        {user && <GlobalChat user={user} userRole={userRole} />}
+
       </div>
   );
 }
