@@ -12,7 +12,6 @@ import {
     User
 } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage"; // <--- 1. DODANY IMPORT
 
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -27,7 +26,8 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const storage = getStorage(app); // <--- 2. DODANY EKSPORT STORAGE
+
+// Providerzy (Tylko Google)
 export const googleProvider = new GoogleAuthProvider();
 
 export {
