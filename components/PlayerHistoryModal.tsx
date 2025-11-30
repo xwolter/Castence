@@ -11,7 +11,7 @@ import { db } from "@/lib/firebase";
 interface PlayerHistoryModalProps {
     nick: string;
     allReports: any[];
-    currentUser: any;
+    currentUser: any; // Może być null/undefined, co wymaga bezpiecznego dostępu
     onClose: () => void;
 }
 
@@ -74,12 +74,15 @@ export default function PlayerHistoryModal({ nick, allReports, currentUser, onCl
         setIsSavingNote(true);
         try {
             const noteRef = doc(db, "player_notes", nick.toLowerCase());
+            // Zabezpieczenie przed brakiem currentUser
+            const lastEditedBy = currentUser?.displayName || "Admin";
+
             await setDoc(noteRef, {
                 content: noteContent,
-                lastEditedBy: currentUser.displayName,
+                lastEditedBy: lastEditedBy,
                 updatedAt: serverTimestamp()
             }, { merge: true });
-            setNoteAuthor(currentUser.displayName);
+            setNoteAuthor(lastEditedBy);
         } catch (e) { alert("Błąd zapisu notatki."); }
         setIsSavingNote(false);
     };
@@ -152,7 +155,7 @@ export default function PlayerHistoryModal({ nick, allReports, currentUser, onCl
     };
 
     const copyCheckCommand = () => {
-        const cmd = `/sprawdz start ${nick}`;
+        const cmd = `/sprawdz ${nick}`;
         copyText(cmd);
         alert(`Skopiowano komendę: ${cmd}`);
     };
@@ -269,7 +272,7 @@ export default function PlayerHistoryModal({ nick, allReports, currentUser, onCl
                     {/* HISTORIA NICKÓW (TIMELINE) */}
                     <div className="bg-[#111] border border-neutral-800 rounded-xl p-4 mt-auto">
                         <h4 className="text-[10px] font-bold text-neutral-500 uppercase mb-3 flex items-center gap-2">
-                            <History className="w-3 h-3" /> Historia Nicków
+                            <History className="w-3 h-3" /> Ostatni nick
                         </h4>
                         {loadingHistory ? (
                             <div className="text-[10px] text-neutral-600 animate-pulse">Pobieranie...</div>
@@ -328,14 +331,21 @@ export default function PlayerHistoryModal({ nick, allReports, currentUser, onCl
                         </div>
                     </div>
 
-                    {/* NOTATKI */}
+                    {/* NOTATKI - Poprawione bezpieczeństwo dostępu do currentUser */}
                     <div className="p-4 border-b border-neutral-800 bg-[#0e0e0e] flex-shrink-0">
                         <div className="flex justify-between items-center mb-2">
                             <h4 className="text-[10px] font-bold text-neutral-400 uppercase flex items-center gap-2">
                                 <StickyNote className="w-3 h-3" /> Notatka
                             </h4>
                             {noteAuthor && (
-                                <span className={`text-[9px] ${noteAuthor === currentUser.displayName ? 'text-yellow-500 font-bold' : 'text-neutral-600'}`}>
+                                <span
+                                    className={`text-[9px] ${
+                                        // Zabezpieczenie przed błędem, jeśli currentUser jest undefined
+                                        currentUser && noteAuthor === currentUser.displayName
+                                            ? 'text-yellow-500 font-bold'
+                                            : 'text-neutral-600'
+                                    }`}
+                                >
                                     Autor: {noteAuthor}
                                 </span>
                             )}
