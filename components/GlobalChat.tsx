@@ -31,7 +31,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
     // UI
     const [showEmoji, setShowEmoji] = useState(false);
     const [reactingToMsgId, setReactingToMsgId] = useState<string | null>(null);
-    const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null); // Do migania po kliknięciu pinu
+    const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null);
 
     // Kreator Kanału
     const [isCreating, setIsCreating] = useState(false);
@@ -113,10 +113,15 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         }
     }, [isCreating]);
 
-    // --- FUNKCJE PRZYPINANIA (NOWE) ---
+    // --- FUNKCJE PRZYPINANIA ---
 
     const handleTogglePin = async (msg: any) => {
-        if (!activeChannelId || userRole !== 'admin') return;
+        if (!activeChannelId) return;
+
+        // Admin może wszystko, Member tylko PRZYPIĄĆ (jeśli nic nie jest przypięte)
+        // Member nie może odpinać (chyba że zrobimy, że autor może)
+        // Tutaj prosta logika: funkcja jest wywoływana tylko gdy przycisk jest widoczny
+
         try {
             await updateDoc(doc(db, "chat_channels", activeChannelId, "messages", msg.id), {
                 isPinned: !msg.isPinned
@@ -129,9 +134,9 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         if (element) {
             element.scrollIntoView({ behavior: "smooth", block: "center" });
             setHighlightedMsgId(msgId);
-            setTimeout(() => setHighlightedMsgId(null), 2000); // Wyłącz podświetlenie po 2s
+            setTimeout(() => setHighlightedMsgId(null), 2000);
         } else {
-            alert("Ta wiadomość jest za stara i nie ma jej w widoku.");
+            alert("Ta wiadomość jest za stara.");
         }
     };
 
@@ -255,7 +260,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
         else setSelectedUsers(prev => [...prev, uid]);
     };
 
-    // --- UI: ZWINIĘTY ---
+    // --- UI ---
     if (!isOpen) {
         return (
             <button onClick={() => setIsOpen(true)} className="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-110 z-50 group">
@@ -266,8 +271,9 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
     }
 
     const pinnedMessages = messages.filter(m => m.isPinned);
+    // Sprawdź czy cokolwiek jest przypięte na tym kanale
+    const isAnyPinned = pinnedMessages.length > 0;
 
-    // --- UI: OTWARTY ---
     return (
         <div className="fixed inset-0 md:inset-auto md:bottom-6 md:right-6 z-[100] md:w-[700px] md:h-[550px] bg-[#0f0f0f] md:border border-neutral-800 md:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden font-sans animate-in slide-in-from-bottom-4 duration-200">
 
@@ -317,7 +323,6 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                     </div>
                 ) : (
                     <>
-                        {/* HEADER CZATU */}
                         <div className="border-b border-neutral-800 flex flex-col shrink-0 z-10">
                             <div className="h-14 flex items-center px-4 gap-3 bg-neutral-950/50">
                                 <button onClick={() => setActiveChannelId(null)} className="md:hidden text-neutral-400 hover:text-white mr-1"><ArrowLeft className="w-5 h-5" /></button>
@@ -326,7 +331,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                 <button onClick={() => setIsOpen(false)} className="md:hidden text-neutral-500"><X className="w-5 h-5"/></button>
                             </div>
 
-                            {/* --- PASEK PRZYPIĘTYCH (NOWE) --- */}
+                            {/* PRZYPIĘTA WIADOMOŚĆ */}
                             {pinnedMessages.length > 0 && (
                                 <div
                                     onClick={() => scrollToMessage(pinnedMessages[0].id)}
@@ -346,12 +351,17 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                 const isMe = user.uid === msg.authorUid;
                                 const canDelete = userRole === 'admin' || isMe;
                                 const isImg = isImageUrl(msg.text);
-                                const isHighlighted = highlightedMsgId === msg.id; // Miganie po kliknięciu pinu
+                                const isHighlighted = highlightedMsgId === msg.id;
+
+                                // LOGIKA PRZYCISKU PRZYPINANIA
+                                // Admin widzi zawsze. Member widzi tylko jeśli nic nie jest przypięte.
+                                const canPin = userRole === 'admin' || (!isAnyPinned && !msg.isPinned);
+                                const canUnpin = userRole === 'admin'; // Tylko admin odpina (lub member jeśli autor? Tu prościej - admin)
 
                                 return (
                                     <div
                                         key={msg.id}
-                                        id={`msg-${msg.id}`} // ID do scrollowania
+                                        id={`msg-${msg.id}`}
                                         className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''} group/msg transition-colors duration-500 ${isHighlighted ? 'bg-indigo-500/20 p-2 rounded-xl -mx-2' : ''}`}
                                     >
                                         <img src={msg.authorPhoto} className="w-8 h-8 rounded-lg bg-neutral-800 object-cover self-start mt-1" />
@@ -359,7 +369,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                         <div className={`max-w-[80%] relative flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                                             {!isMe && <div className="text-[10px] text-neutral-500 ml-1 mb-1 font-bold">{msg.author}</div>}
 
-                                            {/* PRZYPIĘTA IKONA */}
+                                            {/* Ikonka jeśli przypięta */}
                                             {msg.isPinned && (
                                                 <div className={`absolute -top-3 ${isMe ? 'right-0' : 'left-0'} text-indigo-400`}>
                                                     <Pin className="w-3 h-3 rotate-45 fill-indigo-400/20" />
@@ -442,8 +452,8 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
 
                                             {/* MENU AKCJI */}
                                             <div className={`absolute top-0 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition ${isMe ? '-left-20' : '-right-20'}`}>
-                                                {/* PRZYPINANIE (ADMIN) */}
-                                                {userRole === 'admin' && (
+                                                {/* BUTTON PINOWANIA */}
+                                                {(msg.isPinned ? canUnpin : canPin) && (
                                                     <button
                                                         onClick={() => handleTogglePin(msg)}
                                                         className={`p-1.5 bg-neutral-900 border border-neutral-700 rounded-full shadow-md ${msg.isPinned ? 'text-indigo-400' : 'text-neutral-400 hover:text-white'}`}
@@ -481,7 +491,7 @@ export default function GlobalChat({ user, userRole }: GlobalChatProps) {
                                     </div>
                                 ) : (
                                     <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
-                                        {userRole === 'admin' && <button type="button" onClick={() => setIsPollMode(true)} className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" title="Ankieta"><BarChart2 className="w-5 h-5" /></button>}
+                                        <button type="button" onClick={() => setIsPollMode(true)} className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" title="Ankieta"><BarChart2 className="w-5 h-5" /></button>
                                         <button type="button" onClick={() => { setReactingToMsgId(null); setShowEmoji(!showEmoji); }} className={`p-2 rounded-lg transition ${showEmoji ? 'text-yellow-400' : 'text-neutral-400 hover:text-white'}`}><Smile className="w-5 h-5" /></button>
                                         <input type="text" placeholder={`Napisz na #${activeChannelName}...`} className="flex-1 bg-[#161616] border border-neutral-800 rounded-xl px-4 py-2.5 text-xs text-white focus:border-indigo-500/50 outline-none transition placeholder:text-neutral-600" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}/>
                                         <button type="submit" disabled={!newMessage.trim()} className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-50 shadow-lg"><Send className="w-4 h-4"/></button>
