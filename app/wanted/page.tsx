@@ -154,7 +154,7 @@ export default function WantedPage() {
     return (
         <div className="min-h-screen bg-[#050505] text-neutral-200 font-sans selection:bg-red-900/30 pb-20">
 
-            {historyNick && <PlayerHistoryModal nick={historyNick} allReports={reports} onClose={() => setHistoryNick(null)} />}
+            {historyNick && <PlayerHistoryModal nick={historyNick} allReports={reports} currentUser={user} onClose={() => setHistoryNick(null)} />}
 
             <Header user={user} userRole={userRole} stats={stats} onLogout={() => signOut(auth)} onOpenAdmin={() => {}} />
 
