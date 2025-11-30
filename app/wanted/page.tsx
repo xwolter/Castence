@@ -9,7 +9,7 @@ import {
 } from "firebase/firestore";
 import {
     Siren, Plus, Trash2, User, AlertOctagon, AlertTriangle, Eye, X,
-    History, Shield, UserCheck, Trophy, CheckCircle, XCircle, UserX, Clock
+    History, UserCheck, Trophy, CheckCircle, XCircle, UserX, Clock
 } from "lucide-react";
 import Header from "@/components/Header";
 import PlayerHistoryModal from "@/components/PlayerHistoryModal";

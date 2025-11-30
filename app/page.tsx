@@ -213,14 +213,7 @@ export default function Home() {
       <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-neutral-800">
 
         {/* MODAL KARTOTEKI */}
-        {historyNick && (
-            <PlayerHistoryModal
-                nick={historyNick}
-                allReports={reports}
-                currentUser={user} // <--- DODAJ TO
-                onClose={() => setHistoryNick(null)}
-            />
-        )}
+        {historyNick && <PlayerHistoryModal nick={historyNick} allReports={reports} currentUser={user} onClose={() => setHistoryNick(null)} />}
 
         {/* ADMIN PANEL */}
         {showAdminPanel && userRole === "admin" && (
