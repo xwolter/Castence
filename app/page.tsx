@@ -238,6 +238,7 @@ export default function Home() {
             stats={stats}
             onLogout={() => signOut(auth)}
             onOpenAdmin={() => setShowAdminPanel(true)}
+            onSearchPlayer={(nick) => setHistoryNick(nick)} // <--- DODAJ TO!
         />
 
         <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
