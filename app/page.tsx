@@ -113,26 +113,30 @@ export default function Home() {
     }
   }, [userRole]);
 
-  // 3. SYNCHRONIZACJA API (BEZPOŚREDNIO Z PRZEGLĄDARKI)
+  // 3. SYNCHRONIZACJA API (NAPRAWIONA: CORS PROXY)
   const syncWithApi = async () => {
     if (!user) return;
     setIsSyncing(true);
     try {
-        console.log("🔄 Pobieranie banów bezpośrednio z Rotify...");
+        console.log("🔄 Pobieranie banów przez CORS Proxy...");
         
-        // ZMIANA: Bezpośredni fetch do zewnętrznego API
-        const res = await fetch(`https://api.rotify.pl/api/v1/castplay/bans?access=tI9P4VQPd3miL9f4&t=${Date.now()}`);
+        // --- ZMIANA: UŻYCIE CORS PROXY ---
+        // Używamy corsproxy.io, aby ominąć blokadę CORS przeglądarki
+        const targetUrl = `https://api.rotify.pl/api/v1/castplay/bans?access=tI9P4VQPd3miL9f4&t=${Date.now()}`;
+        const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(targetUrl);
+
+        const res = await fetch(proxyUrl);
         
-        if (!res.ok) throw new Error(`Błąd API Rotify: ${res.status}`);
+        if (!res.ok) throw new Error(`Błąd Proxy/API: ${res.status}`);
         
         const data = await res.json();
-        const apiBansArray = Array.isArray(data) ? data : (data.data || []);
+        const apiBansArray = Array.isArray(data) ? data : (data.data && Array.isArray(data.data) ? data.data : []);
         
         console.log(`✅ Pobrano ${apiBansArray.length} banów.`);
         setExternalBans(apiBansArray);
 
         if (apiBansArray.length === 0) {
-            console.warn("Pusta lista banów - pomijam logikę Gulagu.");
+            console.warn("API zwróciło 0 banów. Pomijam logikę Gulagu.");
             setIsSyncing(false);
             return;
         }
@@ -182,8 +186,8 @@ export default function Home() {
         }, { merge: true });
 
     } catch (e) { 
-        console.error("Sync Error (Direct):", e); 
-        alert("Błąd połączenia z API Rotify. Sprawdź konsolę (F12) czy nie ma błędu CORS.");
+        console.error("Sync Error (Proxy):", e); 
+        alert("Błąd pobierania danych. API może być niedostępne.");
     } finally { 
         setIsSyncing(false); 
     }
