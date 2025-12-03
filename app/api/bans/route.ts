@@ -13,8 +13,8 @@ export async function GET() {
         const res = await fetch(API_URL, {
             cache: 'no-store',
             headers: {
-                // Zmieniamy nagłówki, aby ominąć proste blokady WAF
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                // Zmieniamy nagłówki, aby ominąć proste blokady WAF - próba ze starszym UA
+                'User-Agent': "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.4; en-US; rv:1.9.2.2) Gecko/20100316 Firefox/3.6.2",
                 'Accept': 'application/json, text/plain, */*',
                 'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7',
                 // Dodajemy Referer, często API wpuszczają ruch "z Google" lub "z siebie"
