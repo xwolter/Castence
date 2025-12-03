@@ -13,13 +13,12 @@ export async function GET() {
         const res = await fetch(API_URL, {
             cache: 'no-store',
             headers: {
-                // Zmieniamy nagłówki, aby ominąć proste blokady WAF - próba ze starszym UA
+                // Próba ze starym User-Agentem, o który prosiłeś - czasem omija nowsze zabezpieczenia
                 'User-Agent': "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.4; en-US; rv:1.9.2.2) Gecko/20100316 Firefox/3.6.2",
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7',
-                // Dodajemy Referer, często API wpuszczają ruch "z Google" lub "z siebie"
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                // Udajemy wejście z Google
                 'Referer': 'https://www.google.com/',
-                'Origin': 'https://www.google.com',
                 'Cache-Control': 'no-cache',
                 'Pragma': 'no-cache',
                 'Connection': 'keep-alive'
@@ -30,9 +29,9 @@ export async function GET() {
         console.log(`📡 Status odpowiedzi API: ${res.status} ${res.statusText}`);
 
         if (!res.ok) {
-            // Jeśli nadal 403, to znaczy że banują całą pulę IP Vercela
+            // Logujemy początek błędu, żeby zobaczyć czy to znowu HTML Cloudflare
             const errorText = await res.text();
-            console.error(`❌ Błąd API Rotify Body: ${errorText}`);
+            console.error(`❌ Błąd API Rotify (Body Preview): ${errorText.substring(0, 500)}...`);
             return NextResponse.json([], { status: 200 }); 
         }
 
