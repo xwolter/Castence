@@ -1,16 +1,15 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, User } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   collection, addDoc, query, orderBy, onSnapshot, serverTimestamp,
-  doc, setDoc, getDoc, updateDoc, deleteDoc, limit, where, getDocs
+  doc, setDoc, getDoc, updateDoc, deleteDoc, where, getDocs
 } from "firebase/firestore";
-import { 
-  ArrowDownAZ, ArrowUpAZ, CalendarArrowDown, CalendarArrowUp, 
-  DoorOpen, PartyPopper, RefreshCw, Loader2,
-  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search, ShieldAlert, TestTube2
+import {
+  DoorOpen, PartyPopper, RefreshCw,
+  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search, CalendarArrowDown
 } from "lucide-react";
 
 // IMPORT KOMPONENTÓW
@@ -21,9 +20,38 @@ import ReportCard from "@/components/ReportCard";
 import AdminPanel from "@/components/AdminPanel";
 import PlayerHistoryModal from "@/components/PlayerHistoryModal";
 
+// --- HELPERS (Poza komponentem dla wydajności) ---
+const getTimestamp = (d: any) => {
+  if (!d) return 0;
+  if (typeof d === 'number') return d;
+  if (d.toDate) return d.toDate().getTime(); // Firestore Timestamp
+  if (d instanceof Date) return d.getTime();
+  return new Date(d).getTime();
+};
+
+const formatReleaseRelative = (ts: any) => {
+  if (!ts) return "-";
+  try {
+    const time = getTimestamp(ts);
+    const diff = Math.floor((Date.now() - time) / 60000);
+    if (diff < 1) return "Teraz";
+    if (diff < 60) return `${diff} min`;
+    if (diff < 1440) return `${Math.floor(diff / 60)}h`;
+    return `${Math.floor(diff / 1440)}d`;
+  } catch (e) { return "-"; }
+};
+
+const formatReleaseExact = (ts: any) => {
+  if (!ts) return "";
+  try {
+    const time = getTimestamp(ts);
+    return new Date(time).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch (e) { return ""; }
+};
+
 export default function Home() {
   const router = useRouter();
-  const OWNER_EMAIL = "twoj.email@gmail.com"; 
+  const OWNER_EMAIL = "twoj.email@gmail.com";
 
   // --- STANY ---
   const [user, setUser] = useState<User | null>(null);
@@ -32,14 +60,13 @@ export default function Home() {
   const [reports, setReports] = useState<any[]>([]);
   const [externalBans, setExternalBans] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
-  
+
   const [gulagExits, setGulagExits] = useState<any[]>([]);
-  const [gulagSearch, setGulagSearch] = useState(""); 
+  const [gulagSearch, setGulagSearch] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
 
   // UI STATE
-  const [isFormOpen, setIsFormOpen] = useState(false); 
-
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [wantedCount, setWantedCount] = useState(0);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [historyNick, setHistoryNick] = useState<string | null>(null);
@@ -47,22 +74,31 @@ export default function Home() {
 
   // Filtrowanie Główne
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(""); // NOWOŚĆ: Debounce
   const [searchType, setSearchType] = useState("suspect");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortOrder, setSortOrder] = useState("date_desc");
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(6);
+  const [itemsPerPage] = useState(6);
 
   const [formData, setFormData] = useState({
-    suspectNick: "", 
-    discordId: "", 
-    checkerNick: "", 
-    evidenceLink: "", 
+    suspectNick: "",
+    discordId: "",
+    checkerNick: "",
+    evidenceLink: "",
     description: "",
     status: "pending"
   });
 
-  // 1. AUTORYZACJA
+  // --- OPTYMALIZACJA 1: Debounce Search (naprawia input lag) ---
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300); // Czekaj 300ms po ostatnim znaku
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // --- 1. AUTORYZACJA ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
@@ -71,40 +107,46 @@ export default function Home() {
       }
       setUser(currentUser);
 
-      if (currentUser) {
-        if (currentUser.email === OWNER_EMAIL) {
-          setUserRole("admin");
+      if (currentUser.email === OWNER_EMAIL) {
+        setUserRole("admin");
+        // Opcjonalnie: update timestamp logowania w tle, bez await blokującego UI
+        setDoc(doc(db, "users", currentUser.uid), {
+          email: currentUser.email,
+          role: "admin",
+          lastLogin: serverTimestamp()
+        }, { merge: true });
+      } else {
+        const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+        if (userSnap.exists()) setUserRole(userSnap.data().role);
+        else {
           await setDoc(doc(db, "users", currentUser.uid), {
             email: currentUser.email,
-            role: "admin",
-            lastLogin: serverTimestamp()
-          }, { merge: true });
-        } else {
-          const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-          if (userSnap.exists()) setUserRole(userSnap.data().role);
-          else {
-            await setDoc(doc(db, "users", currentUser.uid), {
-              email: currentUser.email,
-              role: "pending",
-              createdAt: serverTimestamp()
-            });
-            setUserRole("pending");
-          }
+            role: "pending",
+            createdAt: serverTimestamp()
+          });
+          setUserRole("pending");
         }
       }
     });
     return () => unsubscribe();
   }, [router]);
 
-  // 2. POBIERANIE DANYCH (REALTIME)
+  // --- 2. POBIERANIE DANYCH ---
   useEffect(() => {
     if (userRole === "member" || userRole === "admin") {
       const unsubReports = onSnapshot(query(collection(db, "reports"), orderBy("createdAt", "desc")), (snap) => {
-        setReports(snap.docs.map(doc => ({ id: doc.id, ...doc.data(), source: 'system' })));
+        // Normalizacja od razu przy pobraniu
+        const data = snap.docs.map(doc => ({ 
+            id: doc.id, 
+            ...doc.data(), 
+            source: 'system',
+            _ts: getTimestamp(doc.data().createdAt) // Cache timestampu dla sortowania
+        }));
+        setReports(data);
       });
+      
       const unsubWanted = onSnapshot(query(collection(db, "wanted")), (snap) => setWantedCount(snap.size));
       
-      // GULAG - POBIERAMY WSZYSTKIE
       const unsubGulag = onSnapshot(query(collection(db, "gulag_releases"), orderBy("releasedAt", "desc")), (snap) => {
          setGulagExits(snap.docs.map(d => d.data()));
       });
@@ -113,92 +155,88 @@ export default function Home() {
     }
   }, [userRole]);
 
-  // 3. SYNCHRONIZACJA API (NAPRAWIONA: CORS PROXY)
-  const syncWithApi = async () => {
+  // --- 3. SYNCHRONIZACJA API ---
+  const syncWithApi = useCallback(async () => {
     if (!user) return;
     setIsSyncing(true);
     try {
-        console.log("🔄 Pobieranie banów przez CORS Proxy...");
-        
-        // --- ZMIANA: UŻYCIE CORS PROXY ---
-        // Używamy corsproxy.io, aby ominąć blokadę CORS przeglądarki
-        const targetUrl = `https://api.rotify.pl/api/v1/castplay/bans?access=tI9P4VQPd3miL9f4&t=${Date.now()}`;
-        const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(targetUrl);
+      console.log("🔄 Pobieranie banów...");
+      const targetUrl = `https://api.rotify.pl/api/v1/castplay/bans?access=tI9P4VQPd3miL9f4&t=${Date.now()}`;
+      const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(targetUrl);
 
-        const res = await fetch(proxyUrl);
-        
-        if (!res.ok) throw new Error(`Błąd Proxy/API: ${res.status}`);
-        
-        const data = await res.json();
-        const apiBansArray = Array.isArray(data) ? data : (data.data && Array.isArray(data.data) ? data.data : []);
-        
-        console.log(`✅ Pobrano ${apiBansArray.length} banów.`);
-        setExternalBans(apiBansArray);
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error(`Status: ${res.status}`);
+      
+      const data = await res.json();
+      const apiBansArray = Array.isArray(data) ? data : (data.data && Array.isArray(data.data) ? data.data : []);
+      
+      setExternalBans(apiBansArray);
 
-        if (apiBansArray.length === 0) {
-            console.warn("API zwróciło 0 banów. Pomijam logikę Gulagu.");
-            setIsSyncing(false);
-            return;
-        }
+      if (apiBansArray.length === 0) {
+          setIsSyncing(false);
+          return;
+      }
 
-        // --- DETEKTOR GULAGU ---
-        const cacheRef = doc(db, "system", "api_cache");
-        const cacheSnap = await getDoc(cacheRef);
-        
-        const currentApiNicks = apiBansArray.map((b: any) => (b.username || b.name || "").toString().trim());
-        const currentApiNicksLower = new Set(currentApiNicks.map((n: string) => n.toLowerCase()));
+      // --- LOGIKA GULAGU (Uproszczona dla czytelności) ---
+      const cacheRef = doc(db, "system", "api_cache");
+      const cacheSnap = await getDoc(cacheRef);
+      
+      const currentApiNicks = apiBansArray.map((b: any) => (b.username || b.name || "").toString().trim());
+      const currentApiNicksLower = new Set(currentApiNicks.map((n: string) => n.toLowerCase()));
 
-        if (cacheSnap.exists()) {
-            const cachedNicks: string[] = cacheSnap.data().bannedNicks || [];
-            
-            // Kto zniknął? (Był w cache, nie ma w API)
-            const unbannedNicks = cachedNicks.filter(cachedNick => 
-                !currentApiNicksLower.has(cachedNick.toLowerCase())
-            );
+      if (cacheSnap.exists()) {
+          const cachedNicks: string[] = cacheSnap.data().bannedNicks || [];
+          const unbannedNicks = cachedNicks.filter(cachedNick => 
+              !currentApiNicksLower.has(cachedNick.toLowerCase())
+          );
 
-            if (unbannedNicks.length > 0) {
-                // Sprawdzamy duplikaty z ostatnich 24h
-                const recentQuery = query(
-                    collection(db, "gulag_releases"), 
-                    where("releasedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
-                );
-                const recentSnap = await getDocs(recentQuery);
-                const recentNicks = new Set(recentSnap.docs.map(d => d.data().nick.toLowerCase()));
+          if (unbannedNicks.length > 0) {
+              const recentQuery = query(
+                  collection(db, "gulag_releases"), 
+                  where("releasedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
+              );
+              const recentSnap = await getDocs(recentQuery);
+              const recentNicks = new Set(recentSnap.docs.map(d => d.data().nick.toLowerCase()));
 
-                const batchPromises = unbannedNicks.map(async (nick) => {
-                    if (!recentNicks.has(nick.toLowerCase())) {
-                        await addDoc(collection(db, "gulag_releases"), {
-                            nick: nick,
-                            releasedAt: serverTimestamp(),
-                            detectedBy: "System"
-                        });
-                    }
-                });
-                await Promise.all(batchPromises);
-                console.log(`🎉 Zaktualizowano Gulag o ${unbannedNicks.length} wyjść.`);
-            }
-        }
+              const batchPromises = unbannedNicks.map(async (nick) => {
+                  if (!recentNicks.has(nick.toLowerCase())) {
+                      await addDoc(collection(db, "gulag_releases"), {
+                          nick: nick,
+                          releasedAt: serverTimestamp(),
+                          detectedBy: "System"
+                      });
+                  }
+              });
+              await Promise.all(batchPromises);
+          }
+      }
 
-        // Aktualizuj cache w bazie
-        await setDoc(cacheRef, { 
-            bannedNicks: currentApiNicks,
-            lastUpdated: serverTimestamp()
-        }, { merge: true });
+      await setDoc(cacheRef, { 
+          bannedNicks: currentApiNicks,
+          lastUpdated: serverTimestamp()
+      }, { merge: true });
 
     } catch (e) { 
-        console.error("Sync Error (Proxy):", e); 
-        alert("Błąd pobierania danych. API może być niedostępne.");
+        console.error("Sync Error:", e); 
+        // alert("Błąd API."); // Usunąłem alert, bo irytuje użytkowników
     } finally { 
         setIsSyncing(false); 
     }
-  };
+  }, [user]);
 
-  useEffect(() => { if (userRole === "member" || userRole === "admin") syncWithApi(); }, [userRole]);
+  // Pobieranie API przy starcie (tylko raz po zalogowaniu)
+  useEffect(() => { 
+      if (userRole === "member" || userRole === "admin") syncWithApi(); 
+  }, [userRole, syncWithApi]);
 
-  // 4. MERGE I SORTOWANIE (GŁÓWNA LISTA)
-  const allMergedReports = useMemo(() => {
-    const formattedApiBans = externalBans.map((ban: any, index: number) => {
+
+  // --- 4. OPTYMALIZACJA MERGE I SORTOWANIA ---
+  // Krok 1: Przetwórz API bany tylko gdy API się zmieni
+  const processedExternalBans = useMemo(() => {
+    return externalBans.map((ban: any, index: number) => {
       const rawDate = ban.start || ban.created || ban.time || ban.createdAt || Date.now();
+      const ts = Number(rawDate) || rawDate;
+      const dateObj = new Date(ts);
       return {
         id: `api-${index}-${ban.username || ban.name}`,
         suspectNick: ban.username || ban.name || "Nieznany",
@@ -207,32 +245,37 @@ export default function Home() {
         evidenceLink: null,
         description: ban.reason || "Import z API",
         source: 'api',
-        createdAt: new Date(Number(rawDate) || rawDate), 
+        createdAt: dateObj,
+        _ts: dateObj.getTime(), // Cache timestamp
         commentsCount: 0
       };
     });
+  }, [externalBans]);
 
+  // Krok 2: Połącz i posortuj (używając cached timestamp)
+  const allMergedReports = useMemo(() => {
+    // Szybkie sprawdzanie duplikatów
     const dbKeys = new Set(reports.map(r => {
-      const d = r.createdAt?.toDate ? r.createdAt.toDate() : new Date(r.createdAt || 0);
-      const dateStr = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
-      return `${r.suspectNick?.toLowerCase()}_${dateStr}`;
+      // Używamy już przeliczonego _ts jeśli istnieje, jeśli nie to fallback
+      const ts = r._ts || getTimestamp(r.createdAt);
+      const dateStr = new Date(ts).toISOString().split('T')[0];
+      return `${(r.suspectNick || "").toLowerCase()}_${dateStr}`;
     }));
 
-    const filteredApiBans = formattedApiBans.filter(apiBan => {
-      const d = apiBan.createdAt;
-      const dateStr = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
-      const key = `${apiBan.suspectNick?.toLowerCase()}_${dateStr}`;
+    const filteredApiBans = processedExternalBans.filter(apiBan => {
+      const dateStr = apiBan.createdAt.toISOString().split('T')[0];
+      const key = `${(apiBan.suspectNick || "").toLowerCase()}_${dateStr}`;
       return !dbKeys.has(key);
     });
 
     const combined = [...reports, ...filteredApiBans];
 
+    // Sortowanie numeryczne jest bardzo szybkie
     return combined.sort((a, b) => {
-        const getTime = (d: any) => d?.toDate ? d.toDate().getTime() : (d instanceof Date ? d.getTime() : new Date(d).getTime());
+        const timeA = a._ts || 0;
+        const timeB = b._ts || 0;
         const nickA = (a.suspectNick || "").toLowerCase();
         const nickB = (b.suspectNick || "").toLowerCase();
-        const timeA = getTime(a.createdAt);
-        const timeB = getTime(b.createdAt);
 
         switch (sortOrder) {
           case 'date_asc': return timeA - timeB;
@@ -241,13 +284,52 @@ export default function Home() {
           case 'date_desc': default: return timeB - timeA;
         }
     });
-  }, [reports, externalBans, sortOrder]);
+  }, [reports, processedExternalBans, sortOrder]);
+
+
+  // --- FILTROWANIE KOŃCOWE (z Debounce) ---
+  const filteredReports = useMemo(() => {
+    let term = debouncedSearchTerm.toLowerCase().replace("#", "");
+    
+    return allMergedReports.filter((report) => {
+        if (filterStatus !== "all" && (report.status || "pending") !== filterStatus) return false;
+        
+        // Optymalizacja: sprawdź typ wyszukiwania przed sprawdzeniem includes
+        if (searchType === "suspect") {
+            return (report.suspectNick || "").toLowerCase().includes(term) || 
+                   (report.discordId || "").toLowerCase().includes(term);
+        }
+        if (searchType === "checker") {
+            return (report.checkerNick || "").toLowerCase().includes(term);
+        }
+        if (searchType === "id") {
+            return report.id.toLowerCase().includes(term);
+        }
+        return false;
+    });
+  }, [allMergedReports, debouncedSearchTerm, filterStatus, searchType]);
+
+  // Paginacja
+  const currentReports = filteredReports.slice((currentPage-1)*itemsPerPage, currentPage*itemsPerPage);
+  const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
+  
+  // Reset strony przy zmianie filtrów (używając debouncedSearchTerm)
+  useEffect(() => setCurrentPage(1), [debouncedSearchTerm, itemsPerPage, searchType, filterStatus, sortOrder]);
 
 
   // --- FILTROWANIE GULAGU ---
-  const filteredGulagExits = gulagExits.filter(g => 
-      g.nick.toLowerCase().includes(gulagSearch.toLowerCase())
-  );
+  const filteredGulagExits = useMemo(() => {
+      const term = gulagSearch.toLowerCase();
+      return gulagExits.filter(g => g.nick.toLowerCase().includes(term));
+  }, [gulagExits, gulagSearch]);
+
+
+  // --- STATYSTYKI ---
+  const stats = useMemo(() => ({
+    total: allMergedReports.length,
+    banned: allMergedReports.filter(r => r.status === 'banned').length,
+    clean: allMergedReports.filter(r => r.status === 'clean').length
+  }), [allMergedReports]);
 
 
   // --- CRUD FUNKCJE ---
@@ -302,40 +384,21 @@ export default function Home() {
       setIsFormOpen(false); 
   };
 
+  // Admin panel listener
   useEffect(() => {
     if (userRole === "admin" && showAdminPanel) {
       return onSnapshot(query(collection(db, "users"), orderBy("createdAt", "desc")), (snap) => setUsersList(snap.docs.map(d => ({ uid: d.id, ...d.data() }))));
     }
   }, [userRole, showAdminPanel]);
-  useEffect(() => setCurrentPage(1), [searchTerm, itemsPerPage, searchType, filterStatus, sortOrder]);
+
+  // Akcje
   const changeUserRole = async (uid: string, role: string) => { if(confirm("Zmienić?")) await updateDoc(doc(db, "users", uid), { role }); };
   const updateUserNick = async (uid: string, newNick: string) => { try { await updateDoc(doc(db, "users", uid), { displayName: newNick }); } catch (e) { alert("Błąd"); } };
   const changeReportStatus = async (id: string, status: string) => { await updateDoc(doc(db, "reports", id), { status }); };
   const confirmDeletion = async (id: string, cancel = false) => { if (cancel) await updateDoc(doc(db, "reports", id), { deletionRequested: false }); else if (confirm("Usunąć?")) await deleteDoc(doc(db, "reports", id)); };
   const requestDeletion = async (id: string) => { if (confirm("Zgłosić?")) await updateDoc(doc(db, "reports", id), { deletionRequested: true }); };
-  
-  const formatReleaseRelative = (ts: any) => { if (!ts) return "-"; try { const date = ts.toDate ? ts.toDate() : new Date(ts); const diff = Math.floor((new Date().getTime() - date.getTime()) / 60000); if(diff < 1) return "Teraz"; if(diff < 60) return `${diff} min`; if(diff < 1440) return `${Math.floor(diff/60)}h`; return `${Math.floor(diff/1440)}d`; } catch(e) { return "-"; } };
-  
-  const formatReleaseExact = (ts: any) => { if (!ts) return ""; try { const date = ts.toDate ? ts.toDate() : new Date(ts); return date.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch(e) { return ""; } };
 
-  const filteredReports = allMergedReports.filter((report) => {
-    let term = searchTerm.toLowerCase().replace("#", "");
-    if (filterStatus !== "all" && (report.status || "pending") !== filterStatus) return false;
-    if (searchType === "suspect") return (report.suspectNick || "").toLowerCase().includes(term) || (report.discordId || "").toLowerCase().includes(term);
-    if (searchType === "checker") return (report.checkerNick || "").toLowerCase().includes(term);
-    if (searchType === "id") return report.id.toLowerCase().includes(term);
-    return false;
-  });
-
-  const currentReports = filteredReports.slice((currentPage-1)*itemsPerPage, currentPage*itemsPerPage);
-  const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
-
-  const stats = {
-    total: allMergedReports.length,
-    banned: allMergedReports.filter(r => r.status === 'banned').length,
-    clean: allMergedReports.filter(r => r.status === 'clean').length
-  };
-
+  // --- RENDER ---
   if (userRole === "loading" || !user) return <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-neutral-500">Weryfikacja...</div>;
   if (userRole === "pending") return <div className="min-h-screen bg-neutral-950 flex items-center justify-center flex-col gap-4 text-neutral-400"><div>Konto oczekuje na weryfikację.</div><button onClick={()=>signOut(auth)} className="underline">Wyloguj</button></div>;
 
@@ -353,8 +416,7 @@ export default function Home() {
             <WantedWidget count={wantedCount} />
 
             {/* --- WIDGET WYJŚCIA Z GULAGU --- */}
-            <div className="bg-[#0f0f0f] border border-emerald-900/30 rounded-xl overflow-hidden shadow-lg animate-in fade-in slide-in-from-left duration-500 flex flex-col h-[290px]">
-
+            <div className="bg-[#0f0f0f] border border-emerald-900/30 rounded-xl overflow-hidden shadow-lg flex flex-col h-[290px]">
               {/* Header z Odświeżaniem */}
               <div className="p-3 border-b border-emerald-900/20 bg-emerald-950/10 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
@@ -410,8 +472,8 @@ export default function Home() {
                             </div>
                           </div>
                           <span className="text-[9px] font-mono text-neutral-500 bg-neutral-900 px-1.5 py-0.5 rounded border border-neutral-800 whitespace-nowrap ml-2">
-                                    {formatReleaseRelative(g.releasedAt)}
-                                </span>
+                                        {formatReleaseRelative(g.releasedAt)}
+                                    </span>
                         </div>
                     ))
                 )}
