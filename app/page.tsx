@@ -113,35 +113,34 @@ export default function Home() {
     }
   }, [userRole]);
 
-  // 3. SYNCHRONIZACJA API (POPRAWIONA)
+  // 3. SYNCHRONIZACJA API (BEZPOŚREDNIO Z PRZEGLĄDARKI)
   const syncWithApi = async () => {
     if (!user) return;
     setIsSyncing(true);
     try {
-        // Dodano cache: 'no-store' aby wymusić świeże dane
-        const res = await fetch('/api/bans', { cache: 'no-store' });
-        if (!res.ok) throw new Error("Błąd API");
+        console.log("🔄 Pobieranie banów bezpośrednio z Rotify...");
+        
+        // ZMIANA: Bezpośredni fetch do zewnętrznego API
+        const res = await fetch(`https://api.rotify.pl/api/v1/castplay/bans?access=tI9P4VQPd3miL9f4&t=${Date.now()}`);
+        
+        if (!res.ok) throw new Error(`Błąd API Rotify: ${res.status}`);
         
         const data = await res.json();
-        // Obsługa różnych struktur danych z API
-        const apiBansArray = Array.isArray(data) ? data : (data.data && Array.isArray(data.data) ? data.data : []);
+        const apiBansArray = Array.isArray(data) ? data : (data.data || []);
         
-        console.log(`Pobrano ${apiBansArray.length} banów z API.`);
+        console.log(`✅ Pobrano ${apiBansArray.length} banów.`);
         setExternalBans(apiBansArray);
 
-        // --- ZABEZPIECZENIE PRZED PUSTYM API ---
-        // Jeśli API zwróci 0 banów, przerywamy sprawdzanie Gulagu.
-        // Zapobiega to sytuacji, gdzie błąd API jest interpretowany jako "wszyscy dostali unbana".
         if (apiBansArray.length === 0) {
-            console.warn("API zwróciło 0 banów. Pomijam detekcję unbanów.");
+            console.warn("Pusta lista banów - pomijam logikę Gulagu.");
             setIsSyncing(false);
             return;
         }
 
+        // --- DETEKTOR GULAGU ---
         const cacheRef = doc(db, "system", "api_cache");
         const cacheSnap = await getDoc(cacheRef);
         
-        // Normalizacja nicków
         const currentApiNicks = apiBansArray.map((b: any) => (b.username || b.name || "").toString().trim());
         const currentApiNicksLower = new Set(currentApiNicks.map((n: string) => n.toLowerCase()));
 
@@ -154,7 +153,7 @@ export default function Home() {
             );
 
             if (unbannedNicks.length > 0) {
-                // Sprawdź czy już nie dodaliśmy tego unbana w ciągu ostatnich 24h (dublowanie)
+                // Sprawdzamy duplikaty z ostatnich 24h
                 const recentQuery = query(
                     collection(db, "gulag_releases"), 
                     where("releasedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
@@ -163,7 +162,6 @@ export default function Home() {
                 const recentNicks = new Set(recentSnap.docs.map(d => d.data().nick.toLowerCase()));
 
                 const batchPromises = unbannedNicks.map(async (nick) => {
-                    // Dodaj tylko jeśli nie ma go w ostatnich unbanach
                     if (!recentNicks.has(nick.toLowerCase())) {
                         await addDoc(collection(db, "gulag_releases"), {
                             nick: nick,
@@ -173,19 +171,19 @@ export default function Home() {
                     }
                 });
                 await Promise.all(batchPromises);
-                console.log("Zaktualizowano Gulag o nowe unbany.");
+                console.log(`🎉 Zaktualizowano Gulag o ${unbannedNicks.length} wyjść.`);
             }
         }
 
-        // Aktualizuj cache TYLKO jeśli mamy dane
+        // Aktualizuj cache w bazie
         await setDoc(cacheRef, { 
             bannedNicks: currentApiNicks,
             lastUpdated: serverTimestamp()
         }, { merge: true });
 
     } catch (e) { 
-        console.error("Błąd synchronizacji:", e); 
-        // Nie czyścimy externalBans w razie błędu, żeby nie znikała lista
+        console.error("Sync Error (Direct):", e); 
+        alert("Błąd połączenia z API Rotify. Sprawdź konsolę (F12) czy nie ma błędu CORS.");
     } finally { 
         setIsSyncing(false); 
     }
@@ -196,7 +194,6 @@ export default function Home() {
   // 4. MERGE I SORTOWANIE (GŁÓWNA LISTA)
   const allMergedReports = useMemo(() => {
     const formattedApiBans = externalBans.map((ban: any, index: number) => {
-      // Obsługa różnych formatów daty z API
       const rawDate = ban.start || ban.created || ban.time || ban.createdAt || Date.now();
       return {
         id: `api-${index}-${ban.username || ban.name}`,
@@ -206,7 +203,7 @@ export default function Home() {
         evidenceLink: null,
         description: ban.reason || "Import z API",
         source: 'api',
-        createdAt: new Date(Number(rawDate) || rawDate), // Próba konwersji
+        createdAt: new Date(Number(rawDate) || rawDate), 
         commentsCount: 0
       };
     });
