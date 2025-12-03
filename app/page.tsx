@@ -5,12 +5,12 @@ import { auth, db, User } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   collection, addDoc, query, orderBy, onSnapshot, serverTimestamp,
-  doc, setDoc, getDoc, updateDoc, deleteDoc, limit
+  doc, setDoc, getDoc, updateDoc, deleteDoc, limit, where, getDocs
 } from "firebase/firestore";
-import {
-  ArrowDownAZ, ArrowUpAZ, CalendarArrowDown, CalendarArrowUp,
+import { 
+  ArrowDownAZ, ArrowUpAZ, CalendarArrowDown, CalendarArrowUp, 
   DoorOpen, PartyPopper, RefreshCw, Loader2,
-  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search
+  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search, ShieldAlert, TestTube2
 } from "lucide-react";
 
 // IMPORT KOMPONENTÓW
@@ -23,7 +23,7 @@ import PlayerHistoryModal from "@/components/PlayerHistoryModal";
 
 export default function Home() {
   const router = useRouter();
-  const OWNER_EMAIL = "twoj.email@gmail.com";
+  const OWNER_EMAIL = "twoj.email@gmail.com"; 
 
   // --- STANY ---
   const [user, setUser] = useState<User | null>(null);
@@ -32,13 +32,13 @@ export default function Home() {
   const [reports, setReports] = useState<any[]>([]);
   const [externalBans, setExternalBans] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
-
+  
   const [gulagExits, setGulagExits] = useState<any[]>([]);
-  const [gulagSearch, setGulagSearch] = useState("");
+  const [gulagSearch, setGulagSearch] = useState(""); 
   const [isSyncing, setIsSyncing] = useState(false);
 
   // UI STATE
-  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isFormOpen, setIsFormOpen] = useState(false); 
 
   const [wantedCount, setWantedCount] = useState(0);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -53,14 +53,13 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(6);
 
-  // POPRAWKA: Dodano pole 'status' do stanu początkowego, żeby TS nie krzyczał
   const [formData, setFormData] = useState({
-    suspectNick: "",
-    discordId: "",
-    checkerNick: "",
-    evidenceLink: "",
+    suspectNick: "", 
+    discordId: "", 
+    checkerNick: "", 
+    evidenceLink: "", 
     description: "",
-    status: "pending" // Domyślny status
+    status: "pending"
   });
 
   // 1. AUTORYZACJA
@@ -104,52 +103,92 @@ export default function Home() {
         setReports(snap.docs.map(doc => ({ id: doc.id, ...doc.data(), source: 'system' })));
       });
       const unsubWanted = onSnapshot(query(collection(db, "wanted")), (snap) => setWantedCount(snap.size));
-
+      
       // GULAG - POBIERAMY WSZYSTKIE
       const unsubGulag = onSnapshot(query(collection(db, "gulag_releases"), orderBy("releasedAt", "desc")), (snap) => {
-        setGulagExits(snap.docs.map(d => d.data()));
+         setGulagExits(snap.docs.map(d => d.data()));
       });
 
       return () => { unsubReports(); unsubWanted(); unsubGulag(); };
     }
   }, [userRole]);
 
-  // 3. SYNCHRONIZACJA API (Funkcja odświeżania)
+  // 3. SYNCHRONIZACJA API (POPRAWIONA)
   const syncWithApi = async () => {
     if (!user) return;
     setIsSyncing(true);
     try {
-      const res = await fetch('/api/bans');
-      if (!res.ok) throw new Error("Błąd API");
-      const data = await res.json();
-      const apiBansArray = Array.isArray(data) ? data : [];
-      setExternalBans(apiBansArray);
+        // Dodano cache: 'no-store' aby wymusić świeże dane
+        const res = await fetch('/api/bans', { cache: 'no-store' });
+        if (!res.ok) throw new Error("Błąd API");
+        
+        const data = await res.json();
+        // Obsługa różnych struktur danych z API
+        const apiBansArray = Array.isArray(data) ? data : (data.data && Array.isArray(data.data) ? data.data : []);
+        
+        console.log(`Pobrano ${apiBansArray.length} banów z API.`);
+        setExternalBans(apiBansArray);
 
-      const cacheRef = doc(db, "system", "api_cache");
-      const cacheSnap = await getDoc(cacheRef);
-      const currentApiNicks = apiBansArray.map((b: any) => (b.username || b.name || "").toString().trim());
-      const currentApiNicksLower = new Set(currentApiNicks.map(n => n.toLowerCase()));
-
-      if (cacheSnap.exists()) {
-        const cachedNicks: string[] = cacheSnap.data().bannedNicks || [];
-        const unbannedNicks = cachedNicks.filter(cachedNick =>
-            !currentApiNicksLower.has(cachedNick.toLowerCase())
-        );
-        if (unbannedNicks.length > 0) {
-          const batchPromises = unbannedNicks.map(async (nick) => {
-            await addDoc(collection(db, "gulag_releases"), {
-              nick: nick,
-              releasedAt: serverTimestamp(),
-              detectedBy: user.displayName || "System"
-            });
-          });
-          await Promise.all(batchPromises);
+        // --- ZABEZPIECZENIE PRZED PUSTYM API ---
+        // Jeśli API zwróci 0 banów, przerywamy sprawdzanie Gulagu.
+        // Zapobiega to sytuacji, gdzie błąd API jest interpretowany jako "wszyscy dostali unbana".
+        if (apiBansArray.length === 0) {
+            console.warn("API zwróciło 0 banów. Pomijam detekcję unbanów.");
+            setIsSyncing(false);
+            return;
         }
-      }
-      if (currentApiNicks.length > 0) {
-        await setDoc(cacheRef, { bannedNicks: currentApiNicks, lastUpdated: serverTimestamp() }, { merge: true });
-      }
-    } catch (e) { console.error(e); } finally { setIsSyncing(false); }
+
+        const cacheRef = doc(db, "system", "api_cache");
+        const cacheSnap = await getDoc(cacheRef);
+        
+        // Normalizacja nicków
+        const currentApiNicks = apiBansArray.map((b: any) => (b.username || b.name || "").toString().trim());
+        const currentApiNicksLower = new Set(currentApiNicks.map((n: string) => n.toLowerCase()));
+
+        if (cacheSnap.exists()) {
+            const cachedNicks: string[] = cacheSnap.data().bannedNicks || [];
+            
+            // Kto zniknął? (Był w cache, nie ma w API)
+            const unbannedNicks = cachedNicks.filter(cachedNick => 
+                !currentApiNicksLower.has(cachedNick.toLowerCase())
+            );
+
+            if (unbannedNicks.length > 0) {
+                // Sprawdź czy już nie dodaliśmy tego unbana w ciągu ostatnich 24h (dublowanie)
+                const recentQuery = query(
+                    collection(db, "gulag_releases"), 
+                    where("releasedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
+                );
+                const recentSnap = await getDocs(recentQuery);
+                const recentNicks = new Set(recentSnap.docs.map(d => d.data().nick.toLowerCase()));
+
+                const batchPromises = unbannedNicks.map(async (nick) => {
+                    // Dodaj tylko jeśli nie ma go w ostatnich unbanach
+                    if (!recentNicks.has(nick.toLowerCase())) {
+                        await addDoc(collection(db, "gulag_releases"), {
+                            nick: nick,
+                            releasedAt: serverTimestamp(),
+                            detectedBy: "System"
+                        });
+                    }
+                });
+                await Promise.all(batchPromises);
+                console.log("Zaktualizowano Gulag o nowe unbany.");
+            }
+        }
+
+        // Aktualizuj cache TYLKO jeśli mamy dane
+        await setDoc(cacheRef, { 
+            bannedNicks: currentApiNicks,
+            lastUpdated: serverTimestamp()
+        }, { merge: true });
+
+    } catch (e) { 
+        console.error("Błąd synchronizacji:", e); 
+        // Nie czyścimy externalBans w razie błędu, żeby nie znikała lista
+    } finally { 
+        setIsSyncing(false); 
+    }
   };
 
   useEffect(() => { if (userRole === "member" || userRole === "admin") syncWithApi(); }, [userRole]);
@@ -157,6 +196,7 @@ export default function Home() {
   // 4. MERGE I SORTOWANIE (GŁÓWNA LISTA)
   const allMergedReports = useMemo(() => {
     const formattedApiBans = externalBans.map((ban: any, index: number) => {
+      // Obsługa różnych formatów daty z API
       const rawDate = ban.start || ban.created || ban.time || ban.createdAt || Date.now();
       return {
         id: `api-${index}-${ban.username || ban.name}`,
@@ -166,7 +206,7 @@ export default function Home() {
         evidenceLink: null,
         description: ban.reason || "Import z API",
         source: 'api',
-        createdAt: new Date(Number(rawDate)),
+        createdAt: new Date(Number(rawDate) || rawDate), // Próba konwersji
         commentsCount: 0
       };
     });
@@ -187,24 +227,24 @@ export default function Home() {
     const combined = [...reports, ...filteredApiBans];
 
     return combined.sort((a, b) => {
-      const getTime = (d: any) => d?.toDate ? d.toDate().getTime() : (d instanceof Date ? d.getTime() : new Date(d).getTime());
-      const nickA = (a.suspectNick || "").toLowerCase();
-      const nickB = (b.suspectNick || "").toLowerCase();
-      const timeA = getTime(a.createdAt);
-      const timeB = getTime(b.createdAt);
+        const getTime = (d: any) => d?.toDate ? d.toDate().getTime() : (d instanceof Date ? d.getTime() : new Date(d).getTime());
+        const nickA = (a.suspectNick || "").toLowerCase();
+        const nickB = (b.suspectNick || "").toLowerCase();
+        const timeA = getTime(a.createdAt);
+        const timeB = getTime(b.createdAt);
 
-      switch (sortOrder) {
-        case 'date_asc': return timeA - timeB;
-        case 'alpha_asc': return nickA.localeCompare(nickB);
-        case 'alpha_desc': return nickB.localeCompare(nickA);
-        case 'date_desc': default: return timeB - timeA;
-      }
+        switch (sortOrder) {
+          case 'date_asc': return timeA - timeB;
+          case 'alpha_asc': return nickA.localeCompare(nickB);
+          case 'alpha_desc': return nickB.localeCompare(nickA);
+          case 'date_desc': default: return timeB - timeA;
+        }
     });
   }, [reports, externalBans, sortOrder]);
 
 
   // --- FILTROWANIE GULAGU ---
-  const filteredGulagExits = gulagExits.filter(g =>
+  const filteredGulagExits = gulagExits.filter(g => 
       g.nick.toLowerCase().includes(gulagSearch.toLowerCase())
   );
 
@@ -222,7 +262,6 @@ export default function Home() {
       authorEmail: user?.email,
       authorUid: user?.uid,
       authorPhoto: user?.photoURL,
-      // POPRAWKA: Teraz TS widzi pole status w formData
       status: formData.status || "pending",
       deletionRequested: false
     };
@@ -230,41 +269,36 @@ export default function Home() {
     try {
       if (editId) await updateDoc(doc(db, "reports", editId), data);
       else await addDoc(collection(db, "reports"), data);
-
-      setEditId(null);
-      // Reset formularza z domyślnym statusem
+      
+      setEditId(null); 
       setFormData({suspectNick:"", discordId:"", checkerNick: "", evidenceLink:"", description:"", status: "pending"});
-      setIsFormOpen(false);
+      setIsFormOpen(false); 
     } catch(e){ console.error(e); }
   };
 
   const handleEditClick = (r: any) => {
     if (r.source === 'api') {
-      setEditId(null);
-      setFormData({
-        suspectNick: r.suspectNick,
-        checkerNick: r.checkerNick || user?.displayName || "System",
-        description: r.description,
-        evidenceLink: "",
-        discordId: "",
-        status: "banned" // Ustawiamy status bana przy imporcie
-      });
+        setEditId(null); 
+        setFormData({
+            suspectNick: r.suspectNick,
+            checkerNick: r.checkerNick || user?.displayName || "System", 
+            description: r.description,
+            evidenceLink: "",
+            discordId: "",
+            status: "banned"
+        });
     } else {
-      setEditId(r.id);
-      // Przy edycji pobieramy status z istniejącego raportu
-      setFormData({
-        ...r,
-        status: r.status || "pending"
-      });
+        setEditId(r.id);
+        setFormData({ ...r, status: r.status || "pending" });
     }
     setIsFormOpen(true);
     window.scrollTo({top:0, behavior:'smooth'});
   };
 
-  const handleCancelEdit = () => {
-    setEditId(null);
-    setFormData({ suspectNick: "", discordId: "", checkerNick: "", evidenceLink: "", description: "", status: "pending" });
-    setIsFormOpen(false);
+  const handleCancelEdit = () => { 
+      setEditId(null); 
+      setFormData({ suspectNick: "", discordId: "", checkerNick: "", evidenceLink: "", description: "", status: "pending" });
+      setIsFormOpen(false); 
   };
 
   useEffect(() => {
@@ -278,9 +312,9 @@ export default function Home() {
   const changeReportStatus = async (id: string, status: string) => { await updateDoc(doc(db, "reports", id), { status }); };
   const confirmDeletion = async (id: string, cancel = false) => { if (cancel) await updateDoc(doc(db, "reports", id), { deletionRequested: false }); else if (confirm("Usunąć?")) await deleteDoc(doc(db, "reports", id)); };
   const requestDeletion = async (id: string) => { if (confirm("Zgłosić?")) await updateDoc(doc(db, "reports", id), { deletionRequested: true }); };
-
+  
   const formatReleaseRelative = (ts: any) => { if (!ts) return "-"; try { const date = ts.toDate ? ts.toDate() : new Date(ts); const diff = Math.floor((new Date().getTime() - date.getTime()) / 60000); if(diff < 1) return "Teraz"; if(diff < 60) return `${diff} min`; if(diff < 1440) return `${Math.floor(diff/60)}h`; return `${Math.floor(diff/1440)}d`; } catch(e) { return "-"; } };
-
+  
   const formatReleaseExact = (ts: any) => { if (!ts) return ""; try { const date = ts.toDate ? ts.toDate() : new Date(ts); return date.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch(e) { return ""; } };
 
   const filteredReports = allMergedReports.filter((report) => {
@@ -312,7 +346,7 @@ export default function Home() {
         <Header user={user} userRole={userRole} stats={stats} onLogout={() => signOut(auth)} onOpenAdmin={() => setShowAdminPanel(true)} onSearchPlayer={setHistoryNick} />
 
         <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
-
+          
           {/* ============= LEWA KOLUMNA (WIDGETY) ============= */}
           <div className="lg:col-span-1 space-y-6">
             <WantedWidget count={wantedCount} />
@@ -320,7 +354,7 @@ export default function Home() {
             {/* --- WIDGET WYJŚCIA Z GULAGU --- */}
             <div className="bg-[#0f0f0f] border border-emerald-900/30 rounded-xl overflow-hidden shadow-lg animate-in fade-in slide-in-from-left duration-500 flex flex-col h-[290px]">
 
-              {/* Header */}
+              {/* Header z Odświeżaniem */}
               <div className="p-3 border-b border-emerald-900/20 bg-emerald-950/10 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-2">
@@ -330,16 +364,17 @@ export default function Home() {
                             <span className="text-[9px] font-mono bg-emerald-900/30 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-900/50">
                                 {gulagExits.length}
                             </span>
-                    <button
-                        onClick={syncWithApi}
+                    <button 
+                        onClick={syncWithApi} 
                         disabled={isSyncing}
                         className="text-emerald-500 hover:text-white transition disabled:opacity-50"
-                        title="Odśwież"
+                        title="Odśwież listę"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
                 </div>
+                {/* Wyszukiwarka Gulagu */}
                 <div className="relative">
                   <input
                       type="text"
@@ -352,7 +387,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Lista */}
+              {/* Lista Unbanów */}
               <div className="p-2 space-y-1.5 overflow-y-auto custom-scrollbar flex-grow">
                 {filteredGulagExits.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-center text-neutral-600 text-[10px] italic gap-2 opacity-50">
@@ -384,66 +419,66 @@ export default function Home() {
 
             {/* --- ZWIJANY FORMULARZ ZGŁOSZEŃ --- */}
             <div className="bg-[#0f0f0f] border border-neutral-800 rounded-xl overflow-hidden shadow-lg transition-all duration-300">
-              <button
-                  onClick={() => { if (editId) handleCancelEdit(); setIsFormOpen(!isFormOpen); }}
-                  className={`w-full flex items-center justify-between p-4 text-left transition-colors ${
-                      isFormOpen ? 'bg-neutral-900/50 text-white' : 'bg-transparent text-neutral-400 hover:text-white hover:bg-neutral-900/30'
-                  }`}
-              >
-                <div className="flex items-center gap-2">
-                  {editId ? <PenLine className="w-4 h-4 text-yellow-500" /> : <Plus className="w-4 h-4" />}
-                  <span className={`text-xs font-bold uppercase tracking-wider ${editId ? 'text-yellow-500' : ''}`}>
+                <button
+                    onClick={() => { if (editId) handleCancelEdit(); setIsFormOpen(!isFormOpen); }}
+                    className={`w-full flex items-center justify-between p-4 text-left transition-colors ${
+                        isFormOpen ? 'bg-neutral-900/50 text-white' : 'bg-transparent text-neutral-400 hover:text-white hover:bg-neutral-900/30'
+                    }`}
+                >
+                    <div className="flex items-center gap-2">
+                        {editId ? <PenLine className="w-4 h-4 text-yellow-500" /> : <Plus className="w-4 h-4" />}
+                        <span className={`text-xs font-bold uppercase tracking-wider ${editId ? 'text-yellow-500' : ''}`}>
                             {editId ? "Uzupełnij Zgłoszenie" : "Dodaj Zgłoszenie"}
                         </span>
-                </div>
-                {isFormOpen ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
-              </button>
+                    </div>
+                    {isFormOpen ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
+                </button>
 
-              <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isFormOpen ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                <div className="p-4 pt-0 border-t border-neutral-800/50">
-                  <ReportForm
-                      formData={formData}
-                      setFormData={setFormData}
-                      onSubmit={handleSubmit}
-                      editId={editId}
-                      onCancelEdit={handleCancelEdit}
-                  />
+                <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isFormOpen ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                    <div className="p-4 pt-0 border-t border-neutral-800/50">
+                        <ReportForm 
+                            formData={formData} 
+                            setFormData={setFormData} 
+                            onSubmit={handleSubmit} 
+                            editId={editId} 
+                            onCancelEdit={handleCancelEdit} 
+                        />
+                    </div>
                 </div>
-              </div>
             </div>
 
           </div>
 
           {/* ============= PRAWA KOLUMNA (LISTA + WYSZUKIWARKA) ============= */}
           <div className="lg:col-span-3">
-
+            
             {/* PANEL FILTRÓW */}
             <div className="flex flex-col gap-3 mb-4">
               <div className="flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 relative">
-                  <input type="text" placeholder="Szukaj (Nick, Discord, ID)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 pl-3 bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white placeholder:text-neutral-600 shadow-sm" />
-                </div>
-                <div className="relative w-full sm:w-48">
-                  <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 pl-9 outline-none cursor-pointer hover:border-neutral-700 appearance-none shadow-sm">
-                    <option value="date_desc">Data: Najnowsze</option><option value="date_asc">Data: Najstarsze</option><option value="alpha_asc">Alfabetycznie: A-Z</option><option value="alpha_desc">Alfabetycznie: Z-A</option>
-                  </select>
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500"><CalendarArrowDown className="w-3.5 h-3.5" /></div>
-                </div>
+                 <div className="flex-1 relative">
+                    <input type="text" placeholder="Szukaj (Nick, Discord, ID)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 pl-3 bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white placeholder:text-neutral-600 shadow-sm" />
+                 </div>
+                 <div className="relative w-full sm:w-48">
+                   <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 pl-9 outline-none cursor-pointer hover:border-neutral-700 appearance-none shadow-sm">
+                     <option value="date_desc">Data: Najnowsze</option><option value="date_asc">Data: Najstarsze</option><option value="alpha_asc">Alfabetycznie: A-Z</option><option value="alpha_desc">Alfabetycznie: Z-A</option>
+                   </select>
+                   <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500"><CalendarArrowDown className="w-3.5 h-3.5" /></div>
+                 </div>
               </div>
-
+              
               <div className="flex flex-col sm:flex-row gap-3 justify-between">
-                <div className="flex gap-2 w-full sm:w-auto">
-                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="all">Wszystkie Statusy</option><option value="pending">Oczekujące</option><option value="banned">Zbanowane</option><option value="clean">Czyste</option></select>
-                  <select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="suspect">Szukaj Gracza</option><option value="checker">Szukaj Admina</option><option value="id">Szukaj ID</option></select>
-                </div>
+                  <div className="flex gap-2 w-full sm:w-auto">
+                     <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="all">Wszystkie Statusy</option><option value="pending">Oczekujące</option><option value="banned">Zbanowane</option><option value="clean">Czyste</option></select>
+                     <select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="suspect">Szukaj Gracza</option><option value="checker">Szukaj Admina</option><option value="id">Szukaj ID</option></select>
+                  </div>
 
-                {totalPages > 1 && (
-                    <div className="flex justify-center sm:justify-end gap-2">
-                      <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Poprzednia</button>
-                      <span className="px-4 py-2 text-xs text-neutral-500 border border-neutral-800 rounded-lg bg-neutral-900 font-mono shadow-sm flex items-center">{currentPage} / {totalPages}</span>
-                      <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Następna</button>
-                    </div>
-                )}
+                  {totalPages > 1 && (
+                      <div className="flex justify-center sm:justify-end gap-2">
+                        <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Poprzednia</button>
+                        <span className="px-4 py-2 text-xs text-neutral-500 border border-neutral-800 rounded-lg bg-neutral-900 font-mono shadow-sm flex items-center">{currentPage} / {totalPages}</span>
+                        <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Następna</button>
+                      </div>
+                  )}
               </div>
             </div>
 
