@@ -53,8 +53,14 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(6);
 
+  // POPRAWKA: Dodano pole 'status' do stanu początkowego, żeby TS nie krzyczał
   const [formData, setFormData] = useState({
-    suspectNick: "", discordId: "", checkerNick: "", evidenceLink: "", description: ""
+    suspectNick: "",
+    discordId: "",
+    checkerNick: "",
+    evidenceLink: "",
+    description: "",
+    status: "pending" // Domyślny status
   });
 
   // 1. AUTORYZACJA
@@ -216,6 +222,7 @@ export default function Home() {
       authorEmail: user?.email,
       authorUid: user?.uid,
       authorPhoto: user?.photoURL,
+      // POPRAWKA: Teraz TS widzi pole status w formData
       status: formData.status || "pending",
       deletionRequested: false
     };
@@ -225,7 +232,8 @@ export default function Home() {
       else await addDoc(collection(db, "reports"), data);
 
       setEditId(null);
-      setFormData({suspectNick:"", discordId:"", checkerNick: "", evidenceLink:"", description:""});
+      // Reset formularza z domyślnym statusem
+      setFormData({suspectNick:"", discordId:"", checkerNick: "", evidenceLink:"", description:"", status: "pending"});
       setIsFormOpen(false);
     } catch(e){ console.error(e); }
   };
@@ -239,12 +247,15 @@ export default function Home() {
         description: r.description,
         evidenceLink: "",
         discordId: "",
-        // @ts-ignore
-        status: "banned"
+        status: "banned" // Ustawiamy status bana przy imporcie
       });
     } else {
       setEditId(r.id);
-      setFormData(r);
+      // Przy edycji pobieramy status z istniejącego raportu
+      setFormData({
+        ...r,
+        status: r.status || "pending"
+      });
     }
     setIsFormOpen(true);
     window.scrollTo({top:0, behavior:'smooth'});
@@ -252,7 +263,7 @@ export default function Home() {
 
   const handleCancelEdit = () => {
     setEditId(null);
-    setFormData({ suspectNick: "", discordId: "", checkerNick: "", evidenceLink: "", description: "" });
+    setFormData({ suspectNick: "", discordId: "", checkerNick: "", evidenceLink: "", description: "", status: "pending" });
     setIsFormOpen(false);
   };
 
@@ -306,10 +317,10 @@ export default function Home() {
           <div className="lg:col-span-1 space-y-6">
             <WantedWidget count={wantedCount} />
 
-            {/* --- WIDGET WYJŚCIA Z GULAGU (TERAZ TUTAJ) --- */}
+            {/* --- WIDGET WYJŚCIA Z GULAGU --- */}
             <div className="bg-[#0f0f0f] border border-emerald-900/30 rounded-xl overflow-hidden shadow-lg animate-in fade-in slide-in-from-left duration-500 flex flex-col h-[290px]">
 
-              {/* Header z Odświeżaniem */}
+              {/* Header */}
               <div className="p-3 border-b border-emerald-900/20 bg-emerald-950/10 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-2">
@@ -319,18 +330,16 @@ export default function Home() {
                             <span className="text-[9px] font-mono bg-emerald-900/30 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-900/50">
                                 {gulagExits.length}
                             </span>
-                    {/* PRZYCISK ODŚWIEŻANIA W NAGŁÓWKU */}
                     <button
                         onClick={syncWithApi}
                         disabled={isSyncing}
                         className="text-emerald-500 hover:text-white transition disabled:opacity-50"
-                        title="Odśwież listę i sprawdź API"
+                        title="Odśwież"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
                 </div>
-                {/* Wyszukiwarka Gulagu */}
                 <div className="relative">
                   <input
                       type="text"
@@ -343,7 +352,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Lista Unbanów */}
+              {/* Lista */}
               <div className="p-2 space-y-1.5 overflow-y-auto custom-scrollbar flex-grow">
                 {filteredGulagExits.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-center text-neutral-600 text-[10px] italic gap-2 opacity-50">
@@ -389,9 +398,16 @@ export default function Home() {
                 </div>
                 {isFormOpen ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
               </button>
+
               <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isFormOpen ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0'}`}>
                 <div className="p-4 pt-0 border-t border-neutral-800/50">
-                  <ReportForm formData={formData} setFormData={setFormData} onSubmit={handleSubmit} editId={editId} onCancelEdit={handleCancelEdit} />
+                  <ReportForm
+                      formData={formData}
+                      setFormData={setFormData}
+                      onSubmit={handleSubmit}
+                      editId={editId}
+                      onCancelEdit={handleCancelEdit}
+                  />
                 </div>
               </div>
             </div>
@@ -401,37 +417,20 @@ export default function Home() {
           {/* ============= PRAWA KOLUMNA (LISTA + WYSZUKIWARKA) ============= */}
           <div className="lg:col-span-3">
 
-            {/* PANEL FILTRÓW (POPRAWIONY WYGLĄD) */}
+            {/* PANEL FILTRÓW */}
             <div className="flex flex-col gap-3 mb-4">
-              {/* Rząd 1: Wyszukiwarka + Sortowanie */}
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1 relative">
-                  <input
-                      type="text"
-                      placeholder="Szukaj (Nick, Discord, ID)..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full p-2.5 pl-3 bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white placeholder:text-neutral-600 shadow-sm"
-                  />
+                  <input type="text" placeholder="Szukaj (Nick, Discord, ID)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 pl-3 bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white placeholder:text-neutral-600 shadow-sm" />
                 </div>
                 <div className="relative w-full sm:w-48">
-                  <select
-                      value={sortOrder}
-                      onChange={(e) => setSortOrder(e.target.value)}
-                      className="w-full bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 pl-9 outline-none cursor-pointer hover:border-neutral-700 appearance-none shadow-sm"
-                  >
-                    <option value="date_desc">Data: Najnowsze</option>
-                    <option value="date_asc">Data: Najstarsze</option>
-                    <option value="alpha_asc">Alfabetycznie: A-Z</option>
-                    <option value="alpha_desc">Alfabetycznie: Z-A</option>
+                  <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 pl-9 outline-none cursor-pointer hover:border-neutral-700 appearance-none shadow-sm">
+                    <option value="date_desc">Data: Najnowsze</option><option value="date_asc">Data: Najstarsze</option><option value="alpha_asc">Alfabetycznie: A-Z</option><option value="alpha_desc">Alfabetycznie: Z-A</option>
                   </select>
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500">
-                    <CalendarArrowDown className="w-3.5 h-3.5" />
-                  </div>
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500"><CalendarArrowDown className="w-3.5 h-3.5" /></div>
                 </div>
               </div>
 
-              {/* Rząd 2: Filtry + Paginacja */}
               <div className="flex flex-col sm:flex-row gap-3 justify-between">
                 <div className="flex gap-2 w-full sm:w-auto">
                   <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="all">Wszystkie Statusy</option><option value="pending">Oczekujące</option><option value="banned">Zbanowane</option><option value="clean">Czyste</option></select>
