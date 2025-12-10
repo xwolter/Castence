@@ -1,19 +1,20 @@
 "use client";
+
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, User } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   collection, addDoc, query, orderBy, onSnapshot, serverTimestamp,
-  doc, setDoc, getDoc, updateDoc, deleteDoc, limit
+  doc, setDoc, getDoc, updateDoc, deleteDoc
 } from "firebase/firestore";
 import {
-  ArrowDownAZ, ArrowUpAZ, CalendarArrowDown, CalendarArrowUp,
-  DoorOpen, PartyPopper, RefreshCw, Loader2,
-  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search
+  DoorOpen, PartyPopper, RefreshCw,
+  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search,
+  CalendarArrowDown
 } from "lucide-react";
 
-// IMPORT KOMPONENTÓW
+// IMPORT KOMPONENTÓW (Upewnij się, że ścieżki są poprawne w Twoim projekcie)
 import Header from "@/components/Header";
 import WantedWidget from "@/components/WantedWidget";
 import ReportForm from "@/components/ReportForm";
@@ -23,7 +24,7 @@ import PlayerHistoryModal from "@/components/PlayerHistoryModal";
 
 export default function Home() {
   const router = useRouter();
-  const OWNER_EMAIL = "twoj.email@gmail.com";
+  const OWNER_EMAIL = "twoj.email@gmail.com"; // Podmień na właściwy email
 
   // --- STANY ---
   const [user, setUser] = useState<User | null>(null);
@@ -94,7 +95,7 @@ export default function Home() {
       }
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [router, OWNER_EMAIL]);
 
   // 2. POBIERANIE DANYCH (REALTIME)
   useEffect(() => {
@@ -113,46 +114,44 @@ export default function Home() {
     }
   }, [userRole]);
 
-  // 3. SYNCHRONIZACJA API (ZAKTUALIZOWANA POD PAGINACJĘ)
+  // 3. SYNCHRONIZACJA API (NAPRAWIONA WERSJA)
   const syncWithApi = async () => {
     if (!user) return;
     setIsSyncing(true);
 
-    // Konfiguracja API
-    const API_ACCESS_TOKEN = "tI9P4VQPd3miL9f4"; // Token z Twojego URL
-    const API_BASE_URL = "https://api.rotify.pl/api/v1/castplay/bans";
+    // --- POPRAWKA TUTAJ ---
+    // Używamy ścieżki proxy zdefiniowanej w next.config.ts
+    // Nie dodajemy tutaj "?access=...", parametry dodamy przy budowaniu URL fetch
+    const API_BASE_URL = "/api/proxy/castplay/bans";
+    const API_ACCESS_TOKEN = "tI9P4VQPd3miL9f4";
     const PAGE_SIZE = 1000;
 
     let allFetchedBans: any[] = [];
     let page = 0;
-    let totalPages = 1; // Inicjalnie 1, żeby wejść w pętlę
+    let totalPages = 1;
 
     try {
-      // PĘTLA POBIERAJĄCA WSZYSTKIE STRONY
       do {
-        const res = await fetch(`${API_BASE_URL}?access=${API_ACCESS_TOKEN}&page=${page}&size=${PAGE_SIZE}`);
+        // Budujemy poprawny URL z parametrami
+        const url = `${API_BASE_URL}?access=${API_ACCESS_TOKEN}&page=${page}&size=${PAGE_SIZE}`;
 
-        if (!res.ok) throw new Error(`Błąd API: ${res.status}`);
+        const res = await fetch(url);
+
+        if (!res.ok) throw new Error(`Błąd API: ${res.status} ${res.statusText}`);
 
         const data = await res.json();
 
-        // 1. Sprawdź nową strukturę (pole "content")
         const pageContent = data.content && Array.isArray(data.content) ? data.content : [];
-
-        // 2. Dodaj pobrane bany do głównej listy
         allFetchedBans = [...allFetchedBans, ...pageContent];
 
-        // 3. Aktualizuj liczbę stron z odpowiedzi API
         if (typeof data.totalPages === 'number') {
           totalPages = data.totalPages;
         }
 
-        // Przejdź do kolejnej strony
         page++;
 
       } while (page < totalPages);
 
-      // Ustawienie stanu zewnętrznych banów
       setExternalBans(allFetchedBans);
 
       // --- LOGIKA CACHE I DETEKCJI UNBANÓW ---
@@ -164,15 +163,12 @@ export default function Home() {
 
       if (cacheSnap.exists()) {
         const cachedNicks: string[] = cacheSnap.data().bannedNicks || [];
-        // Sprawdzamy kogo brakuje w nowym API (kto dostał unbana)
         const unbannedNicks = cachedNicks.filter(cachedNick =>
             !currentApiNicksLower.has(cachedNick.toLowerCase())
         );
 
         if (unbannedNicks.length > 0) {
           const batchPromises = unbannedNicks.map(async (nick) => {
-            // Sprawdź czy już nie dodaliśmy tego unbana ostatnio (opcjonalne zabezpieczenie)
-            // Tutaj dodajemy po prostu do kolekcji
             await addDoc(collection(db, "gulag_releases"), {
               nick: nick,
               releasedAt: serverTimestamp(),
@@ -183,25 +179,29 @@ export default function Home() {
         }
       }
 
-      // Aktualizuj cache w bazie tylko jeśli pobrano dane
       if (currentApiNicks.length > 0) {
         await setDoc(cacheRef, { bannedNicks: currentApiNicks, lastUpdated: serverTimestamp() }, { merge: true });
       }
 
     } catch (e) {
       console.error("Błąd synchronizacji API:", e);
-      alert("Wystąpił błąd podczas synchronizacji z API. Sprawdź konsolę.");
+      // Nie używamy alert(), żeby nie irytować użytkownika, logujemy do konsoli
     } finally {
       setIsSyncing(false);
     }
   };
 
-  useEffect(() => { if (userRole === "member" || userRole === "admin") syncWithApi(); }, [userRole]);
+  // Automatyczna synchronizacja przy załadowaniu (jeśli rola pozwala)
+  useEffect(() => {
+    if (userRole === "member" || userRole === "admin") {
+      syncWithApi();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userRole]);
 
-  // 4. MERGE I SORTOWANIE (GŁÓWNA LISTA)
+  // 4. MERGE I SORTOWANIE
   const allMergedReports = useMemo(() => {
     const formattedApiBans = externalBans.map((ban: any, index: number) => {
-      // Obsługa różnych formatów daty z API
       const rawDate = ban.start || ban.created || ban.time || ban.createdAt || Date.now();
       return {
         id: `api-${index}-${ban.username || ban.name}`,
@@ -211,7 +211,7 @@ export default function Home() {
         evidenceLink: null,
         description: ban.reason || "Import z API",
         source: 'api',
-        createdAt: new Date(Number(rawDate)), // Konwersja timestampa
+        createdAt: new Date(Number(rawDate)),
         commentsCount: 0
       };
     });
@@ -314,7 +314,9 @@ export default function Home() {
       return onSnapshot(query(collection(db, "users"), orderBy("createdAt", "desc")), (snap) => setUsersList(snap.docs.map(d => ({ uid: d.id, ...d.data() }))));
     }
   }, [userRole, showAdminPanel]);
+
   useEffect(() => setCurrentPage(1), [searchTerm, itemsPerPage, searchType, filterStatus, sortOrder]);
+
   const changeUserRole = async (uid: string, role: string) => { if(confirm("Zmienić?")) await updateDoc(doc(db, "users", uid), { role }); };
   const updateUserNick = async (uid: string, newNick: string) => { try { await updateDoc(doc(db, "users", uid), { displayName: newNick }); } catch (e) { alert("Błąd"); } };
   const changeReportStatus = async (id: string, status: string) => { await updateDoc(doc(db, "reports", id), { status }); };
@@ -322,7 +324,6 @@ export default function Home() {
   const requestDeletion = async (id: string) => { if (confirm("Zgłosić?")) await updateDoc(doc(db, "reports", id), { deletionRequested: true }); };
 
   const formatReleaseRelative = (ts: any) => { if (!ts) return "-"; try { const date = ts.toDate ? ts.toDate() : new Date(ts); const diff = Math.floor((new Date().getTime() - date.getTime()) / 60000); if(diff < 1) return "Teraz"; if(diff < 60) return `${diff} min`; if(diff < 1440) return `${Math.floor(diff/60)}h`; return `${Math.floor(diff/1440)}d`; } catch(e) { return "-"; } };
-
   const formatReleaseExact = (ts: any) => { if (!ts) return ""; try { const date = ts.toDate ? ts.toDate() : new Date(ts); return date.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch(e) { return ""; } };
 
   const filteredReports = allMergedReports.filter((report) => {
