@@ -114,16 +114,14 @@ export default function Home() {
     }
   }, [userRole]);
 
-  // 3. SYNCHRONIZACJA API (NAPRAWIONA WERSJA)
+  // 3. SYNCHRONIZACJA API (NOWA WERSJA - PRZEZ ROUTE HANDLER)
   const syncWithApi = async () => {
     if (!user) return;
     setIsSyncing(true);
 
-    // --- POPRAWKA TUTAJ ---
-    // Używamy ścieżki proxy zdefiniowanej w next.config.ts
-    // Nie dodajemy tutaj "?access=...", parametry dodamy przy budowaniu URL fetch
-    const API_BASE_URL = "/api/proxy/castplay/bans";
-    const API_ACCESS_TOKEN = "tI9P4VQPd3miL9f4";
+    // Teraz uderzamy do NASZEGO endpointu, który stworzyliśmy w kroku 1
+    const API_BASE_URL = "/api/proxy";
+    // Token jest teraz bezpiecznie zaszyty w route.ts, nie musimy go tu podawać
     const PAGE_SIZE = 1000;
 
     let allFetchedBans: any[] = [];
@@ -132,12 +130,16 @@ export default function Home() {
 
     try {
       do {
-        // Budujemy poprawny URL z parametrami
-        const url = `${API_BASE_URL}?access=${API_ACCESS_TOKEN}&page=${page}&size=${PAGE_SIZE}`;
+        // Proste zapytanie do naszego proxy
+        const url = `${API_BASE_URL}?page=${page}&size=${PAGE_SIZE}`;
 
         const res = await fetch(url);
 
-        if (!res.ok) throw new Error(`Błąd API: ${res.status} ${res.statusText}`);
+        if (!res.ok) {
+          // Jeśli proxy zwróci błąd, rzucamy go, by obsłużył to catch
+          const errData = await res.json();
+          throw new Error(errData.error || `Błąd HTTP: ${res.status}`);
+        }
 
         const data = await res.json();
 
@@ -154,7 +156,7 @@ export default function Home() {
 
       setExternalBans(allFetchedBans);
 
-      // --- LOGIKA CACHE I DETEKCJI UNBANÓW ---
+      // --- PONIŻEJ BEZ ZMIAN (LOGIKA CACHE) ---
       const cacheRef = doc(db, "system", "api_cache");
       const cacheSnap = await getDoc(cacheRef);
 
@@ -183,9 +185,10 @@ export default function Home() {
         await setDoc(cacheRef, { bannedNicks: currentApiNicks, lastUpdated: serverTimestamp() }, { merge: true });
       }
 
-    } catch (e) {
+    } catch (e: any) {
       console.error("Błąd synchronizacji API:", e);
-      // Nie używamy alert(), żeby nie irytować użytkownika, logujemy do konsoli
+      // Opcjonalnie wyświetl błąd userowi, jeśli chcesz:
+      // alert(`Błąd: ${e.message}`);
     } finally {
       setIsSyncing(false);
     }
