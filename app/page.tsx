@@ -1,15 +1,16 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, User } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   collection, addDoc, query, orderBy, onSnapshot, serverTimestamp,
-  doc, setDoc, getDoc, updateDoc, deleteDoc, where, getDocs
+  doc, setDoc, getDoc, updateDoc, deleteDoc, limit
 } from "firebase/firestore";
 import {
-  DoorOpen, PartyPopper, RefreshCw,
-  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search, CalendarArrowDown
+  ArrowDownAZ, ArrowUpAZ, CalendarArrowDown, CalendarArrowUp,
+  DoorOpen, PartyPopper, RefreshCw, Loader2,
+  Ghost, Plus, ChevronDown, ChevronUp, PenLine, Search
 } from "lucide-react";
 
 // IMPORT KOMPONENTÓW
@@ -19,35 +20,6 @@ import ReportForm from "@/components/ReportForm";
 import ReportCard from "@/components/ReportCard";
 import AdminPanel from "@/components/AdminPanel";
 import PlayerHistoryModal from "@/components/PlayerHistoryModal";
-
-// --- HELPERS (Poza komponentem dla wydajności) ---
-const getTimestamp = (d: any) => {
-  if (!d) return 0;
-  if (typeof d === 'number') return d;
-  if (d.toDate) return d.toDate().getTime(); // Firestore Timestamp
-  if (d instanceof Date) return d.getTime();
-  return new Date(d).getTime();
-};
-
-const formatReleaseRelative = (ts: any) => {
-  if (!ts) return "-";
-  try {
-    const time = getTimestamp(ts);
-    const diff = Math.floor((Date.now() - time) / 60000);
-    if (diff < 1) return "Teraz";
-    if (diff < 60) return `${diff} min`;
-    if (diff < 1440) return `${Math.floor(diff / 60)}h`;
-    return `${Math.floor(diff / 1440)}d`;
-  } catch (e) { return "-"; }
-};
-
-const formatReleaseExact = (ts: any) => {
-  if (!ts) return "";
-  try {
-    const time = getTimestamp(ts);
-    return new Date(time).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  } catch (e) { return ""; }
-};
 
 export default function Home() {
   const router = useRouter();
@@ -67,6 +39,7 @@ export default function Home() {
 
   // UI STATE
   const [isFormOpen, setIsFormOpen] = useState(false);
+
   const [wantedCount, setWantedCount] = useState(0);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [historyNick, setHistoryNick] = useState<string | null>(null);
@@ -74,12 +47,11 @@ export default function Home() {
 
   // Filtrowanie Główne
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(""); // NOWOŚĆ: Debounce
   const [searchType, setSearchType] = useState("suspect");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortOrder, setSortOrder] = useState("date_desc");
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(6);
+  const [itemsPerPage, setItemsPerPage] = useState(6);
 
   const [formData, setFormData] = useState({
     suspectNick: "",
@@ -90,15 +62,7 @@ export default function Home() {
     status: "pending"
   });
 
-  // --- OPTYMALIZACJA 1: Debounce Search (naprawia input lag) ---
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 300); // Czekaj 300ms po ostatnim znaku
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // --- 1. AUTORYZACJA ---
+  // 1. AUTORYZACJA
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
@@ -107,136 +71,138 @@ export default function Home() {
       }
       setUser(currentUser);
 
-      if (currentUser.email === OWNER_EMAIL) {
-        setUserRole("admin");
-        // Opcjonalnie: update timestamp logowania w tle, bez await blokującego UI
-        setDoc(doc(db, "users", currentUser.uid), {
-          email: currentUser.email,
-          role: "admin",
-          lastLogin: serverTimestamp()
-        }, { merge: true });
-      } else {
-        const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-        if (userSnap.exists()) setUserRole(userSnap.data().role);
-        else {
+      if (currentUser) {
+        if (currentUser.email === OWNER_EMAIL) {
+          setUserRole("admin");
           await setDoc(doc(db, "users", currentUser.uid), {
             email: currentUser.email,
-            role: "pending",
-            createdAt: serverTimestamp()
-          });
-          setUserRole("pending");
+            role: "admin",
+            lastLogin: serverTimestamp()
+          }, { merge: true });
+        } else {
+          const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+          if (userSnap.exists()) setUserRole(userSnap.data().role);
+          else {
+            await setDoc(doc(db, "users", currentUser.uid), {
+              email: currentUser.email,
+              role: "pending",
+              createdAt: serverTimestamp()
+            });
+            setUserRole("pending");
+          }
         }
       }
     });
     return () => unsubscribe();
   }, [router]);
 
-  // --- 2. POBIERANIE DANYCH ---
+  // 2. POBIERANIE DANYCH (REALTIME)
   useEffect(() => {
     if (userRole === "member" || userRole === "admin") {
       const unsubReports = onSnapshot(query(collection(db, "reports"), orderBy("createdAt", "desc")), (snap) => {
-        // Normalizacja od razu przy pobraniu
-        const data = snap.docs.map(doc => ({ 
-            id: doc.id, 
-            ...doc.data(), 
-            source: 'system',
-            _ts: getTimestamp(doc.data().createdAt) // Cache timestampu dla sortowania
-        }));
-        setReports(data);
+        setReports(snap.docs.map(doc => ({ id: doc.id, ...doc.data(), source: 'system' })));
       });
-      
       const unsubWanted = onSnapshot(query(collection(db, "wanted")), (snap) => setWantedCount(snap.size));
-      
+
+      // GULAG - POBIERAMY WSZYSTKIE
       const unsubGulag = onSnapshot(query(collection(db, "gulag_releases"), orderBy("releasedAt", "desc")), (snap) => {
-         setGulagExits(snap.docs.map(d => d.data()));
+        setGulagExits(snap.docs.map(d => d.data()));
       });
 
       return () => { unsubReports(); unsubWanted(); unsubGulag(); };
     }
   }, [userRole]);
 
-  // --- 3. SYNCHRONIZACJA API ---
-  const syncWithApi = useCallback(async () => {
+  // 3. SYNCHRONIZACJA API (ZAKTUALIZOWANA POD PAGINACJĘ)
+  const syncWithApi = async () => {
     if (!user) return;
     setIsSyncing(true);
+
+    // Konfiguracja API
+    const API_ACCESS_TOKEN = "tI9P4VQPd3miL9f4"; // Token z Twojego URL
+    const API_BASE_URL = "https://api.rotify.pl/api/v1/castplay/bans";
+    const PAGE_SIZE = 1000;
+
+    let allFetchedBans: any[] = [];
+    let page = 0;
+    let totalPages = 1; // Inicjalnie 1, żeby wejść w pętlę
+
     try {
-      console.log("🔄 Pobieranie banów...");
-      const targetUrl = `https://api.rotify.pl/api/v1/castplay/bans?access=tI9P4VQPd3miL9f4&t=${Date.now()}`;
-      const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(targetUrl);
+      // PĘTLA POBIERAJĄCA WSZYSTKIE STRONY
+      do {
+        const res = await fetch(`${API_BASE_URL}?access=${API_ACCESS_TOKEN}&page=${page}&size=${PAGE_SIZE}`);
 
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error(`Status: ${res.status}`);
-      
-      const data = await res.json();
-      const apiBansArray = Array.isArray(data) ? data : (data.data && Array.isArray(data.data) ? data.data : []);
-      
-      setExternalBans(apiBansArray);
+        if (!res.ok) throw new Error(`Błąd API: ${res.status}`);
 
-      if (apiBansArray.length === 0) {
-          setIsSyncing(false);
-          return;
-      }
+        const data = await res.json();
 
-      // --- LOGIKA GULAGU (Uproszczona dla czytelności) ---
+        // 1. Sprawdź nową strukturę (pole "content")
+        const pageContent = data.content && Array.isArray(data.content) ? data.content : [];
+
+        // 2. Dodaj pobrane bany do głównej listy
+        allFetchedBans = [...allFetchedBans, ...pageContent];
+
+        // 3. Aktualizuj liczbę stron z odpowiedzi API
+        if (typeof data.totalPages === 'number') {
+          totalPages = data.totalPages;
+        }
+
+        // Przejdź do kolejnej strony
+        page++;
+
+      } while (page < totalPages);
+
+      // Ustawienie stanu zewnętrznych banów
+      setExternalBans(allFetchedBans);
+
+      // --- LOGIKA CACHE I DETEKCJI UNBANÓW ---
       const cacheRef = doc(db, "system", "api_cache");
       const cacheSnap = await getDoc(cacheRef);
-      
-      const currentApiNicks = apiBansArray.map((b: any) => (b.username || b.name || "").toString().trim());
-      const currentApiNicksLower = new Set(currentApiNicks.map((n: string) => n.toLowerCase()));
+
+      const currentApiNicks = allFetchedBans.map((b: any) => (b.username || b.name || "").toString().trim());
+      const currentApiNicksLower = new Set(currentApiNicks.map(n => n.toLowerCase()));
 
       if (cacheSnap.exists()) {
-          const cachedNicks: string[] = cacheSnap.data().bannedNicks || [];
-          const unbannedNicks = cachedNicks.filter(cachedNick => 
-              !currentApiNicksLower.has(cachedNick.toLowerCase())
-          );
+        const cachedNicks: string[] = cacheSnap.data().bannedNicks || [];
+        // Sprawdzamy kogo brakuje w nowym API (kto dostał unbana)
+        const unbannedNicks = cachedNicks.filter(cachedNick =>
+            !currentApiNicksLower.has(cachedNick.toLowerCase())
+        );
 
-          if (unbannedNicks.length > 0) {
-              const recentQuery = query(
-                  collection(db, "gulag_releases"), 
-                  where("releasedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
-              );
-              const recentSnap = await getDocs(recentQuery);
-              const recentNicks = new Set(recentSnap.docs.map(d => d.data().nick.toLowerCase()));
-
-              const batchPromises = unbannedNicks.map(async (nick) => {
-                  if (!recentNicks.has(nick.toLowerCase())) {
-                      await addDoc(collection(db, "gulag_releases"), {
-                          nick: nick,
-                          releasedAt: serverTimestamp(),
-                          detectedBy: "System"
-                      });
-                  }
-              });
-              await Promise.all(batchPromises);
-          }
+        if (unbannedNicks.length > 0) {
+          const batchPromises = unbannedNicks.map(async (nick) => {
+            // Sprawdź czy już nie dodaliśmy tego unbana ostatnio (opcjonalne zabezpieczenie)
+            // Tutaj dodajemy po prostu do kolekcji
+            await addDoc(collection(db, "gulag_releases"), {
+              nick: nick,
+              releasedAt: serverTimestamp(),
+              detectedBy: user.displayName || "System"
+            });
+          });
+          await Promise.all(batchPromises);
+        }
       }
 
-      await setDoc(cacheRef, { 
-          bannedNicks: currentApiNicks,
-          lastUpdated: serverTimestamp()
-      }, { merge: true });
+      // Aktualizuj cache w bazie tylko jeśli pobrano dane
+      if (currentApiNicks.length > 0) {
+        await setDoc(cacheRef, { bannedNicks: currentApiNicks, lastUpdated: serverTimestamp() }, { merge: true });
+      }
 
-    } catch (e) { 
-        console.error("Sync Error:", e); 
-        // alert("Błąd API."); // Usunąłem alert, bo irytuje użytkowników
-    } finally { 
-        setIsSyncing(false); 
+    } catch (e) {
+      console.error("Błąd synchronizacji API:", e);
+      alert("Wystąpił błąd podczas synchronizacji z API. Sprawdź konsolę.");
+    } finally {
+      setIsSyncing(false);
     }
-  }, [user]);
+  };
 
-  // Pobieranie API przy starcie (tylko raz po zalogowaniu)
-  useEffect(() => { 
-      if (userRole === "member" || userRole === "admin") syncWithApi(); 
-  }, [userRole, syncWithApi]);
+  useEffect(() => { if (userRole === "member" || userRole === "admin") syncWithApi(); }, [userRole]);
 
-
-  // --- 4. OPTYMALIZACJA MERGE I SORTOWANIA ---
-  // Krok 1: Przetwórz API bany tylko gdy API się zmieni
-  const processedExternalBans = useMemo(() => {
-    return externalBans.map((ban: any, index: number) => {
+  // 4. MERGE I SORTOWANIE (GŁÓWNA LISTA)
+  const allMergedReports = useMemo(() => {
+    const formattedApiBans = externalBans.map((ban: any, index: number) => {
+      // Obsługa różnych formatów daty z API
       const rawDate = ban.start || ban.created || ban.time || ban.createdAt || Date.now();
-      const ts = Number(rawDate) || rawDate;
-      const dateObj = new Date(ts);
       return {
         id: `api-${index}-${ban.username || ban.name}`,
         suspectNick: ban.username || ban.name || "Nieznany",
@@ -245,91 +211,47 @@ export default function Home() {
         evidenceLink: null,
         description: ban.reason || "Import z API",
         source: 'api',
-        createdAt: dateObj,
-        _ts: dateObj.getTime(), // Cache timestamp
+        createdAt: new Date(Number(rawDate)), // Konwersja timestampa
         commentsCount: 0
       };
     });
-  }, [externalBans]);
 
-  // Krok 2: Połącz i posortuj (używając cached timestamp)
-  const allMergedReports = useMemo(() => {
-    // Szybkie sprawdzanie duplikatów
     const dbKeys = new Set(reports.map(r => {
-      // Używamy już przeliczonego _ts jeśli istnieje, jeśli nie to fallback
-      const ts = r._ts || getTimestamp(r.createdAt);
-      const dateStr = new Date(ts).toISOString().split('T')[0];
-      return `${(r.suspectNick || "").toLowerCase()}_${dateStr}`;
+      const d = r.createdAt?.toDate ? r.createdAt.toDate() : new Date(r.createdAt || 0);
+      const dateStr = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+      return `${r.suspectNick?.toLowerCase()}_${dateStr}`;
     }));
 
-    const filteredApiBans = processedExternalBans.filter(apiBan => {
-      const dateStr = apiBan.createdAt.toISOString().split('T')[0];
-      const key = `${(apiBan.suspectNick || "").toLowerCase()}_${dateStr}`;
+    const filteredApiBans = formattedApiBans.filter(apiBan => {
+      const d = apiBan.createdAt;
+      const dateStr = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+      const key = `${apiBan.suspectNick?.toLowerCase()}_${dateStr}`;
       return !dbKeys.has(key);
     });
 
     const combined = [...reports, ...filteredApiBans];
 
-    // Sortowanie numeryczne jest bardzo szybkie
     return combined.sort((a, b) => {
-        const timeA = a._ts || 0;
-        const timeB = b._ts || 0;
-        const nickA = (a.suspectNick || "").toLowerCase();
-        const nickB = (b.suspectNick || "").toLowerCase();
+      const getTime = (d: any) => d?.toDate ? d.toDate().getTime() : (d instanceof Date ? d.getTime() : new Date(d).getTime());
+      const nickA = (a.suspectNick || "").toLowerCase();
+      const nickB = (b.suspectNick || "").toLowerCase();
+      const timeA = getTime(a.createdAt);
+      const timeB = getTime(b.createdAt);
 
-        switch (sortOrder) {
-          case 'date_asc': return timeA - timeB;
-          case 'alpha_asc': return nickA.localeCompare(nickB);
-          case 'alpha_desc': return nickB.localeCompare(nickA);
-          case 'date_desc': default: return timeB - timeA;
-        }
+      switch (sortOrder) {
+        case 'date_asc': return timeA - timeB;
+        case 'alpha_asc': return nickA.localeCompare(nickB);
+        case 'alpha_desc': return nickB.localeCompare(nickA);
+        case 'date_desc': default: return timeB - timeA;
+      }
     });
-  }, [reports, processedExternalBans, sortOrder]);
-
-
-  // --- FILTROWANIE KOŃCOWE (z Debounce) ---
-  const filteredReports = useMemo(() => {
-    let term = debouncedSearchTerm.toLowerCase().replace("#", "");
-    
-    return allMergedReports.filter((report) => {
-        if (filterStatus !== "all" && (report.status || "pending") !== filterStatus) return false;
-        
-        // Optymalizacja: sprawdź typ wyszukiwania przed sprawdzeniem includes
-        if (searchType === "suspect") {
-            return (report.suspectNick || "").toLowerCase().includes(term) || 
-                   (report.discordId || "").toLowerCase().includes(term);
-        }
-        if (searchType === "checker") {
-            return (report.checkerNick || "").toLowerCase().includes(term);
-        }
-        if (searchType === "id") {
-            return report.id.toLowerCase().includes(term);
-        }
-        return false;
-    });
-  }, [allMergedReports, debouncedSearchTerm, filterStatus, searchType]);
-
-  // Paginacja
-  const currentReports = filteredReports.slice((currentPage-1)*itemsPerPage, currentPage*itemsPerPage);
-  const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
-  
-  // Reset strony przy zmianie filtrów (używając debouncedSearchTerm)
-  useEffect(() => setCurrentPage(1), [debouncedSearchTerm, itemsPerPage, searchType, filterStatus, sortOrder]);
+  }, [reports, externalBans, sortOrder]);
 
 
   // --- FILTROWANIE GULAGU ---
-  const filteredGulagExits = useMemo(() => {
-      const term = gulagSearch.toLowerCase();
-      return gulagExits.filter(g => g.nick.toLowerCase().includes(term));
-  }, [gulagExits, gulagSearch]);
-
-
-  // --- STATYSTYKI ---
-  const stats = useMemo(() => ({
-    total: allMergedReports.length,
-    banned: allMergedReports.filter(r => r.status === 'banned').length,
-    clean: allMergedReports.filter(r => r.status === 'clean').length
-  }), [allMergedReports]);
+  const filteredGulagExits = gulagExits.filter(g =>
+      g.nick.toLowerCase().includes(gulagSearch.toLowerCase())
+  );
 
 
   // --- CRUD FUNKCJE ---
@@ -352,53 +274,75 @@ export default function Home() {
     try {
       if (editId) await updateDoc(doc(db, "reports", editId), data);
       else await addDoc(collection(db, "reports"), data);
-      
-      setEditId(null); 
+
+      setEditId(null);
       setFormData({suspectNick:"", discordId:"", checkerNick: "", evidenceLink:"", description:"", status: "pending"});
-      setIsFormOpen(false); 
+      setIsFormOpen(false);
     } catch(e){ console.error(e); }
   };
 
   const handleEditClick = (r: any) => {
     if (r.source === 'api') {
-        setEditId(null); 
-        setFormData({
-            suspectNick: r.suspectNick,
-            checkerNick: r.checkerNick || user?.displayName || "System", 
-            description: r.description,
-            evidenceLink: "",
-            discordId: "",
-            status: "banned"
-        });
+      setEditId(null);
+      setFormData({
+        suspectNick: r.suspectNick,
+        checkerNick: r.checkerNick || user?.displayName || "System",
+        description: r.description,
+        evidenceLink: "",
+        discordId: "",
+        status: "banned"
+      });
     } else {
-        setEditId(r.id);
-        setFormData({ ...r, status: r.status || "pending" });
+      setEditId(r.id);
+      setFormData({
+        ...r,
+        status: r.status || "pending"
+      });
     }
     setIsFormOpen(true);
     window.scrollTo({top:0, behavior:'smooth'});
   };
 
-  const handleCancelEdit = () => { 
-      setEditId(null); 
-      setFormData({ suspectNick: "", discordId: "", checkerNick: "", evidenceLink: "", description: "", status: "pending" });
-      setIsFormOpen(false); 
+  const handleCancelEdit = () => {
+    setEditId(null);
+    setFormData({ suspectNick: "", discordId: "", checkerNick: "", evidenceLink: "", description: "", status: "pending" });
+    setIsFormOpen(false);
   };
 
-  // Admin panel listener
   useEffect(() => {
     if (userRole === "admin" && showAdminPanel) {
       return onSnapshot(query(collection(db, "users"), orderBy("createdAt", "desc")), (snap) => setUsersList(snap.docs.map(d => ({ uid: d.id, ...d.data() }))));
     }
   }, [userRole, showAdminPanel]);
-
-  // Akcje
+  useEffect(() => setCurrentPage(1), [searchTerm, itemsPerPage, searchType, filterStatus, sortOrder]);
   const changeUserRole = async (uid: string, role: string) => { if(confirm("Zmienić?")) await updateDoc(doc(db, "users", uid), { role }); };
   const updateUserNick = async (uid: string, newNick: string) => { try { await updateDoc(doc(db, "users", uid), { displayName: newNick }); } catch (e) { alert("Błąd"); } };
   const changeReportStatus = async (id: string, status: string) => { await updateDoc(doc(db, "reports", id), { status }); };
   const confirmDeletion = async (id: string, cancel = false) => { if (cancel) await updateDoc(doc(db, "reports", id), { deletionRequested: false }); else if (confirm("Usunąć?")) await deleteDoc(doc(db, "reports", id)); };
   const requestDeletion = async (id: string) => { if (confirm("Zgłosić?")) await updateDoc(doc(db, "reports", id), { deletionRequested: true }); };
 
-  // --- RENDER ---
+  const formatReleaseRelative = (ts: any) => { if (!ts) return "-"; try { const date = ts.toDate ? ts.toDate() : new Date(ts); const diff = Math.floor((new Date().getTime() - date.getTime()) / 60000); if(diff < 1) return "Teraz"; if(diff < 60) return `${diff} min`; if(diff < 1440) return `${Math.floor(diff/60)}h`; return `${Math.floor(diff/1440)}d`; } catch(e) { return "-"; } };
+
+  const formatReleaseExact = (ts: any) => { if (!ts) return ""; try { const date = ts.toDate ? ts.toDate() : new Date(ts); return date.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch(e) { return ""; } };
+
+  const filteredReports = allMergedReports.filter((report) => {
+    let term = searchTerm.toLowerCase().replace("#", "");
+    if (filterStatus !== "all" && (report.status || "pending") !== filterStatus) return false;
+    if (searchType === "suspect") return (report.suspectNick || "").toLowerCase().includes(term) || (report.discordId || "").toLowerCase().includes(term);
+    if (searchType === "checker") return (report.checkerNick || "").toLowerCase().includes(term);
+    if (searchType === "id") return report.id.toLowerCase().includes(term);
+    return false;
+  });
+
+  const currentReports = filteredReports.slice((currentPage-1)*itemsPerPage, currentPage*itemsPerPage);
+  const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
+
+  const stats = {
+    total: allMergedReports.length,
+    banned: allMergedReports.filter(r => r.status === 'banned').length,
+    clean: allMergedReports.filter(r => r.status === 'clean').length
+  };
+
   if (userRole === "loading" || !user) return <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-neutral-500">Weryfikacja...</div>;
   if (userRole === "pending") return <div className="min-h-screen bg-neutral-950 flex items-center justify-center flex-col gap-4 text-neutral-400"><div>Konto oczekuje na weryfikację.</div><button onClick={()=>signOut(auth)} className="underline">Wyloguj</button></div>;
 
@@ -410,14 +354,15 @@ export default function Home() {
         <Header user={user} userRole={userRole} stats={stats} onLogout={() => signOut(auth)} onOpenAdmin={() => setShowAdminPanel(true)} onSearchPlayer={setHistoryNick} />
 
         <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 grid grid-cols-1 lg:grid-cols-4 gap-8">
-          
+
           {/* ============= LEWA KOLUMNA (WIDGETY) ============= */}
           <div className="lg:col-span-1 space-y-6">
             <WantedWidget count={wantedCount} />
 
             {/* --- WIDGET WYJŚCIA Z GULAGU --- */}
-            <div className="bg-[#0f0f0f] border border-emerald-900/30 rounded-xl overflow-hidden shadow-lg flex flex-col h-[290px]">
-              {/* Header z Odświeżaniem */}
+            <div className="bg-[#0f0f0f] border border-emerald-900/30 rounded-xl overflow-hidden shadow-lg animate-in fade-in slide-in-from-left duration-500 flex flex-col h-[290px]">
+
+              {/* Header */}
               <div className="p-3 border-b border-emerald-900/20 bg-emerald-950/10 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-2">
@@ -427,17 +372,16 @@ export default function Home() {
                             <span className="text-[9px] font-mono bg-emerald-900/30 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-900/50">
                                 {gulagExits.length}
                             </span>
-                    <button 
-                        onClick={syncWithApi} 
+                    <button
+                        onClick={syncWithApi}
                         disabled={isSyncing}
                         className="text-emerald-500 hover:text-white transition disabled:opacity-50"
-                        title="Odśwież listę"
+                        title="Odśwież"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
                 </div>
-                {/* Wyszukiwarka Gulagu */}
                 <div className="relative">
                   <input
                       type="text"
@@ -450,7 +394,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Lista Unbanów */}
+              {/* Lista */}
               <div className="p-2 space-y-1.5 overflow-y-auto custom-scrollbar flex-grow">
                 {filteredGulagExits.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-center text-neutral-600 text-[10px] italic gap-2 opacity-50">
@@ -472,8 +416,8 @@ export default function Home() {
                             </div>
                           </div>
                           <span className="text-[9px] font-mono text-neutral-500 bg-neutral-900 px-1.5 py-0.5 rounded border border-neutral-800 whitespace-nowrap ml-2">
-                                        {formatReleaseRelative(g.releasedAt)}
-                                    </span>
+                                    {formatReleaseRelative(g.releasedAt)}
+                                </span>
                         </div>
                     ))
                 )}
@@ -482,66 +426,66 @@ export default function Home() {
 
             {/* --- ZWIJANY FORMULARZ ZGŁOSZEŃ --- */}
             <div className="bg-[#0f0f0f] border border-neutral-800 rounded-xl overflow-hidden shadow-lg transition-all duration-300">
-                <button
-                    onClick={() => { if (editId) handleCancelEdit(); setIsFormOpen(!isFormOpen); }}
-                    className={`w-full flex items-center justify-between p-4 text-left transition-colors ${
-                        isFormOpen ? 'bg-neutral-900/50 text-white' : 'bg-transparent text-neutral-400 hover:text-white hover:bg-neutral-900/30'
-                    }`}
-                >
-                    <div className="flex items-center gap-2">
-                        {editId ? <PenLine className="w-4 h-4 text-yellow-500" /> : <Plus className="w-4 h-4" />}
-                        <span className={`text-xs font-bold uppercase tracking-wider ${editId ? 'text-yellow-500' : ''}`}>
+              <button
+                  onClick={() => { if (editId) handleCancelEdit(); setIsFormOpen(!isFormOpen); }}
+                  className={`w-full flex items-center justify-between p-4 text-left transition-colors ${
+                      isFormOpen ? 'bg-neutral-900/50 text-white' : 'bg-transparent text-neutral-400 hover:text-white hover:bg-neutral-900/30'
+                  }`}
+              >
+                <div className="flex items-center gap-2">
+                  {editId ? <PenLine className="w-4 h-4 text-yellow-500" /> : <Plus className="w-4 h-4" />}
+                  <span className={`text-xs font-bold uppercase tracking-wider ${editId ? 'text-yellow-500' : ''}`}>
                             {editId ? "Uzupełnij Zgłoszenie" : "Dodaj Zgłoszenie"}
                         </span>
-                    </div>
-                    {isFormOpen ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
-                </button>
-
-                <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isFormOpen ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                    <div className="p-4 pt-0 border-t border-neutral-800/50">
-                        <ReportForm 
-                            formData={formData} 
-                            setFormData={setFormData} 
-                            onSubmit={handleSubmit} 
-                            editId={editId} 
-                            onCancelEdit={handleCancelEdit} 
-                        />
-                    </div>
                 </div>
+                {isFormOpen ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
+              </button>
+
+              <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isFormOpen ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className="p-4 pt-0 border-t border-neutral-800/50">
+                  <ReportForm
+                      formData={formData}
+                      setFormData={setFormData}
+                      onSubmit={handleSubmit}
+                      editId={editId}
+                      onCancelEdit={handleCancelEdit}
+                  />
+                </div>
+              </div>
             </div>
 
           </div>
 
           {/* ============= PRAWA KOLUMNA (LISTA + WYSZUKIWARKA) ============= */}
           <div className="lg:col-span-3">
-            
+
             {/* PANEL FILTRÓW */}
             <div className="flex flex-col gap-3 mb-4">
               <div className="flex flex-col sm:flex-row gap-3">
-                 <div className="flex-1 relative">
-                    <input type="text" placeholder="Szukaj (Nick, Discord, ID)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 pl-3 bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white placeholder:text-neutral-600 shadow-sm" />
-                 </div>
-                 <div className="relative w-full sm:w-48">
-                   <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 pl-9 outline-none cursor-pointer hover:border-neutral-700 appearance-none shadow-sm">
-                     <option value="date_desc">Data: Najnowsze</option><option value="date_asc">Data: Najstarsze</option><option value="alpha_asc">Alfabetycznie: A-Z</option><option value="alpha_desc">Alfabetycznie: Z-A</option>
-                   </select>
-                   <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500"><CalendarArrowDown className="w-3.5 h-3.5" /></div>
-                 </div>
+                <div className="flex-1 relative">
+                  <input type="text" placeholder="Szukaj (Nick, Discord, ID)..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2.5 pl-3 bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs focus:border-neutral-600 outline-none text-white placeholder:text-neutral-600 shadow-sm" />
+                </div>
+                <div className="relative w-full sm:w-48">
+                  <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 pl-9 outline-none cursor-pointer hover:border-neutral-700 appearance-none shadow-sm">
+                    <option value="date_desc">Data: Najnowsze</option><option value="date_asc">Data: Najstarsze</option><option value="alpha_asc">Alfabetycznie: A-Z</option><option value="alpha_desc">Alfabetycznie: Z-A</option>
+                  </select>
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500"><CalendarArrowDown className="w-3.5 h-3.5" /></div>
+                </div>
               </div>
-              
-              <div className="flex flex-col sm:flex-row gap-3 justify-between">
-                  <div className="flex gap-2 w-full sm:w-auto">
-                     <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="all">Wszystkie Statusy</option><option value="pending">Oczekujące</option><option value="banned">Zbanowane</option><option value="clean">Czyste</option></select>
-                     <select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="suspect">Szukaj Gracza</option><option value="checker">Szukaj Admina</option><option value="id">Szukaj ID</option></select>
-                  </div>
 
-                  {totalPages > 1 && (
-                      <div className="flex justify-center sm:justify-end gap-2">
-                        <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Poprzednia</button>
-                        <span className="px-4 py-2 text-xs text-neutral-500 border border-neutral-800 rounded-lg bg-neutral-900 font-mono shadow-sm flex items-center">{currentPage} / {totalPages}</span>
-                        <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Następna</button>
-                      </div>
-                  )}
+              <div className="flex flex-col sm:flex-row gap-3 justify-between">
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="all">Wszystkie Statusy</option><option value="pending">Oczekujące</option><option value="banned">Zbanowane</option><option value="clean">Czyste</option></select>
+                  <select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="bg-[#0a0a0a] border border-neutral-800 rounded-lg text-xs text-neutral-400 p-2.5 outline-none cursor-pointer hover:border-neutral-700 flex-1 sm:flex-none shadow-sm"><option value="suspect">Szukaj Gracza</option><option value="checker">Szukaj Admina</option><option value="id">Szukaj ID</option></select>
+                </div>
+
+                {totalPages > 1 && (
+                    <div className="flex justify-center sm:justify-end gap-2">
+                      <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Poprzednia</button>
+                      <span className="px-4 py-2 text-xs text-neutral-500 border border-neutral-800 rounded-lg bg-neutral-900 font-mono shadow-sm flex items-center">{currentPage} / {totalPages}</span>
+                      <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-neutral-400 disabled:opacity-30 hover:bg-neutral-800 shadow-sm">Następna</button>
+                    </div>
+                )}
               </div>
             </div>
 
